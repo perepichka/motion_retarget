@@ -15,7 +15,6 @@ PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
 def visualize_mpl(data):
     """Visualizes animation data using matplotlib.
 
-
     :param data: Animation data in format [njoints, 3, nframes]
 
     """
@@ -50,8 +49,6 @@ def visualize_mpl(data):
         blit=False
     )
 
-    #plt.xlim(-1, 3)
-    #plt.ylim(-3, 3)
     ax.set_xlim3d(0,1)
     ax.set_ylim3d(0,1)
     ax.set_zlim3d(0,1)

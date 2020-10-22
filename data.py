@@ -16,13 +16,12 @@ from visualization import pose2im_all
 
 from PIL import Image
 
-PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
 
 DEFAULT_MIXAMO_TRAIN = './data/mixamo/36_800_24/train'
 DEFAULT_MIXAMO_VALID = './data/mixamo/36_800_24/valid'
 DEFAULT_SOLODANCE_TRAIN = './data/solo_dance/train'
 
-DEFAULT_TYPE = 'mixamo'
+DEFAULT_TYPE = 'npy'
 
 DATASET_ARGUMENTS = {
     'path': DEFAULT_MIXAMO_TRAIN,
@@ -50,15 +49,13 @@ class AnimDataset(Dataset):
         self._anims = None
 
         # Parse dataset
-        if self.type.lower() == 'mixamo':
-            self._load_mixamo()
-        elif self.type.lower() == 'solo_dance':
-            self._load_solo_dance()
+        if self.type.lower() == 'npy':
+            self._load_npy()
         else:
             raise NotImplementedError
 
 
-    def _load_mixamo(self):
+    def _load_npy(self):
         """Parses exported Mixamo dataset."""
 
         characters = sorted(os.listdir(self.path))
@@ -68,22 +65,23 @@ class AnimDataset(Dataset):
             anims = sorted(os.listdir(os.path.join(self.path, character)))
 
             for anim_name in anims:
-
                 anim_path = os.path.join(
-                    self.path, character, anim_name, anim_name + '.npy'
+                    self.path, character, anim_name, 
                 )
 
-                anim = np.load(anim_path)
-                
-                visualize_mpl(anim)
-                #skeleton = pose2im_all(anim[:,:,0])
-                #im = Image.fromarray(skeleton)
-                #im.show()
+                takes = sorted(os.listdir(anim_path))
 
+                for take in takes:
+                    take_path = os.path.join(
+                        self.path, character, anim_name, take
+                    )
 
-    def _load_dance(self):
-        pass
+                    anim = np.load(take_path)
 
+                    if anim.shape[1] != 3:
+                        anim = np.concatenate([anim, np.zeros_like(anim[:,0:1, :])], axis=1)
+                    
+                    visualize_mpl(anim)
 
     def _load_video(self):
         raise NotImplementedError
