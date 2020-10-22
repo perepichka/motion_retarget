@@ -10,6 +10,14 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
+from visualize import visualize_mpl
+
+from visualization import pose2im_all
+
+from PIL import Image
+
+PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
+
 DEFAULT_MIXAMO_TRAIN = './data/mixamo/36_800_24/train'
 DEFAULT_MIXAMO_VALID = './data/mixamo/36_800_24/valid'
 DEFAULT_SOLODANCE_TRAIN = './data/solo_dance/train'
@@ -44,6 +52,8 @@ class AnimDataset(Dataset):
         # Parse dataset
         if self.type.lower() == 'mixamo':
             self._load_mixamo()
+        elif self.type.lower() == 'solo_dance':
+            self._load_solo_dance()
         else:
             raise NotImplementedError
 
@@ -64,13 +74,23 @@ class AnimDataset(Dataset):
                 )
 
                 anim = np.load(anim_path)
-
                 
+                visualize_mpl(anim)
+                #skeleton = pose2im_all(anim[:,:,0])
+                #im = Image.fromarray(skeleton)
+                #im.show()
+
+
+    def _load_dance(self):
+        pass
 
 
     def _load_video(self):
         raise NotImplementedError
 
+    def __getitem__(self, index):
+        """Get data."""
+        pass
 
 
 
