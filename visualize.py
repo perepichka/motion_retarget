@@ -15,12 +15,18 @@ PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
 def visualize_mpl(data):
     """Visualizes animation data using matplotlib.
 
-    :param data: Animation data in format [njoints, 3, nframes]
+    :param data: Animation data in format [nframes, njoints, 3]
 
     """
+
+    if type(data) == torch.Tensor:
+        data = data.clone().numpy()
+    else:
+        data = data.copy()
     
     # Easier to work with in this format
-    data = data.copy().swapaxes(0,1)
+    data = data.copy().swapaxes(0,-1)
+    #data = data.copy().swapaxes(0,1)
 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')

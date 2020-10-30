@@ -13,6 +13,8 @@ from torch.utils.data import Dataset, DataLoader
 
 from visualize import visualize_mpl
 
+from transforms import *
+
 from visualization import pose2im_all
 
 from PIL import Image
@@ -38,7 +40,7 @@ DATASETBASE_ARGUMENTS = {
 
 class _AnimDatasetBase(Dataset):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, transforms=None, *args, **kwargs):
         """Animation dataset constructor.
 
         """
@@ -56,6 +58,7 @@ class _AnimDatasetBase(Dataset):
         self.num_joints = 0
         self.num_frames = 0
         self.num_anims = 0
+        self.transforms = transforms
 
         self._frames = None
         self._anim_ranges = []
@@ -105,10 +108,6 @@ class _AnimDatasetBase(Dataset):
 
                     if anim.shape[1] != 3:
                         anim = np.concatenate([anim, np.zeros_like(anim[:,0:1, :])], axis=1)
-
-                    # Debug visualization
-                    if self.visualize_loading:
-                        visualize_mpl(anim)
                     
                     # Put in-order [nframes, njoints, 3]
                     anim = anim.swapaxes(0, -1)
@@ -149,11 +148,10 @@ class _AnimDatasetBase(Dataset):
 
         logging.info('Finished loading {} frames'.format(self._frames.shape[0]))
 
-
     def _load_video(self):
         raise NotImplementedError
 
-    def __len__(self, index):
+    def __len__(self):
         if self._frames is None:
             return 0
         else:
@@ -162,21 +160,21 @@ class _AnimDatasetBase(Dataset):
     def __getitem__(self, index):
         """Get data."""
 
-        if self._anims is None:
+        if self._frames is None:
             raise Exception('Animations not loaded!')
 
-        return self._frames[index]
+        data = self._frames[index]
+
+        if self.transforms is not None:
+            data = self.transforms(data)
+
+        return data
 
 
 class AnimDataset(_AnimDatasetBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-    def __getitem__(self, index):
-        if self._anims is None:
-            raise Exception('Animations not loaded!')
-        return self._frames[index]
 
     def save(self, path=None):
         """Serializes the loaded dataset."""
@@ -190,10 +188,9 @@ class AnimDataset(_AnimDatasetBase):
         logging.info('Saving model to {}'.format(path))
 
         torch.save({
-            #'num_joints': self.num_joints,
             '_frames': self._frames,
-            #'_anim_ranges': self._anim_ranges,
-            #'_anim_names': self._anim_names,
+            '_anim_ranges': self._anim_ranges,
+            '_anim_names': self._anim_names,
         }, path)
 
     def load(self, path=None):
@@ -223,7 +220,23 @@ class AnimDatasetWindowed(_AnimDatasetBase):
 
 
 if __name__ == '__main__':
-    ds = AnimDataset()
-    ds.load()
-    #ds.process()
-    ds.save('./data/mixamo/36_800_24/train/tst.pt')
+
+    transformations = torch.nn.Sequential(
+        IK(),
+        LimbScale(std=0.05),
+        FK(),
+    )
+
+    ds = AnimDataset(transforms=transformations)
+    #ds = AnimDataset()
+
+    try:
+        ds.load()
+    except Excpetion:
+        ds.process()
+        ds.save()
+
+    dl = DataLoader(ds, batch_size=256)
+
+    for i, pose in enumerate(dl):
+        visualize_mpl(pose)
