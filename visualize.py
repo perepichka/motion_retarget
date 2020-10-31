@@ -71,11 +71,11 @@ def update_mpl_anim(frame, data, joints, links):
     for joint_index, parent_index, link in zip(range(len(PARENTS)),PARENTS,links):
         if parent_index != -1:
             link[0].set_data(
-                [[data[0,joint_index,frame], data[0,parent_index,frame]],
-                [data[1,joint_index,frame], data[1,parent_index,frame]]]
+                np.array([[data[0,joint_index,frame], data[0,parent_index,frame]],
+                [data[1,joint_index,frame], data[1,parent_index,frame]]])
             )
             link[0].set_3d_properties(
-                [data[2,joint_index,frame], data[2,parent_index,frame]]
+                np.array([data[2,joint_index,frame], data[2,parent_index,frame]])
             )
 
 if __name__ == '__main__':

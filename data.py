@@ -15,8 +15,6 @@ from visualize import visualize_mpl
 
 from transforms import *
 
-from visualization import pose2im_all
-
 from PIL import Image
 
 

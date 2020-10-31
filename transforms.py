@@ -14,26 +14,8 @@ from torch.utils.data import Dataset, DataLoader
 
 from visualize import visualize_mpl
 
-from visualization import pose2im_all
 
 PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
-
-## Helper functions
-#
-#def fk(local_pos, local_rot, parents):
-#    """Simple forward kinematics function."""
-#
-#    pass
-#
-#def ik(data, parents):
-#    """Simple inverse kinematics function."""
-#
-#    for index, parent_index in enumerate(parents):
-#        joints[...,parent_index, :]-=
-#
-#    pass
-
-# Pytorch 
 
 def build_transforms(transforms):
     """Helper function for building transformations.
@@ -90,7 +72,6 @@ class LimbScale(nn.Module):
         :param per_batch: Whether to sample a single scaling factor per-batch.
         
         """
-
 
         super().__init__()
 
