@@ -41,7 +41,15 @@ DATASETBASE_ARGUMENTS = {
 class _AnimDatasetBase(Dataset):
 
     def __init__(self, transforms=None, *args, **kwargs):
-        """Animation dataset constructor.
+        """Animation Dataset constructor.
+        
+        :param transforms: Tranformations to transform/augment animation data.
+        :param path: Path to the folder containing the dataset.
+        :param type: Type of the dataset.
+        :param window_size: Size of the dataset Window.
+        :param window_interval: Stride between window samples.
+        :param visualize_loading: Whether to visualize animation data while 
+            loading.
 
         """
 
@@ -58,18 +66,33 @@ class _AnimDatasetBase(Dataset):
         self.num_joints = 0
         self.num_frames = 0
         self.num_anims = 0
-        self.transforms = transforms
 
         self._frames = None
         self._anim_ranges = []
         self._anim_names = []
-            
+
+        # Set up transforms
+        self.transforms = transforms
+        self._frames_transformed = None
+
     def process(self):
         """Processes the dataset."""
         if self.type.lower() == 'npy':
             self._load_npy()
         else:
             raise NotImplementedError
+
+    def precompute_transforms(self):
+        """Precomputes animation transforms."""
+
+        if self._frames is None or len(self._frames) == 0:
+            raise Exception('No data to precompute transforms on')
+
+        # Pass relevant info to transforms
+        for k,v in self.transforms._modules.items():
+            v.ranges = self._anim_ranges
+
+        self._frames_transformed = self.transforms((self._frames, self._anim_ranges))
     
     def _load_npy(self):
         """Parses exported Mixamo dataset."""
@@ -121,7 +144,7 @@ class _AnimDatasetBase(Dataset):
 
                     stored_anims.append(anim)
                     self._anim_ranges.append(
-                        (self.num_frames-1+anim.shape[0])
+                        (self.num_frames-1, self.num_frames-1+anim.shape[0])
                     )
                     self._anim_names.append(
                         '{}_{}'.format(character, anim_name)
@@ -165,8 +188,10 @@ class _AnimDatasetBase(Dataset):
 
         data = self._frames[index]
 
-        if self.transforms is not None:
+        if self.transforms is not None and self._frames_transformed is None:
             data = self.transforms(data)
+        else:
+            data = self._frames_transformed[index]
 
         return data
 
@@ -225,16 +250,18 @@ if __name__ == '__main__':
         IK(),
         LimbScale(std=0.05),
         FK(),
+        To2D(),
     )
 
     ds = AnimDataset(transforms=transformations)
-    #ds = AnimDataset()
 
     try:
         ds.load()
-    except Excpetion:
+    except Exception:
         ds.process()
         ds.save()
+    
+    ds.precompute_transforms()
 
     dl = DataLoader(ds, batch_size=256)
 
