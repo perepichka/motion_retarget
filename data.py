@@ -116,7 +116,7 @@ class AnimDataset(Dataset):
                 new_root_index = new_root
 
         # Reprocess parent joints
-
+        # @TODO finish this
         # All 
 
 
@@ -299,9 +299,9 @@ class AnimDataset(Dataset):
 
     def compute_stats(self):
         """Computes statistics info."""
+        
+        self.
 
-        print(self.anim_mean.shape)
-        print(self.anim_std.shape)
 
 
     def __len__(self):
