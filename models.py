@@ -7,6 +7,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 
+def rotate_and_maybe_project(x):
+    # @FIXME REMOVE ONCE ITS ACTUALLY IMPLEMENTED
+    return x
+
+
 class ConvEncoder(nn.Module):
 
     @classmethod

@@ -16,6 +16,15 @@ import torch.nn.functional as F
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 8
 
+
+class Trainer(nn.Module):
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __call__(self):
+        pass
+
 # ====================================== #
 # Code for creating/storing experiments
 # ====================================== #
@@ -134,9 +143,9 @@ def create_args():
     )
     # Model parameters
     parser.add_argument(
-        'model',
+        'config',
         type=str,
-        help='Type of model to train.'
+        help='Path to config file.'
     )
     parser.add_argument(
         '--use_gpu',
