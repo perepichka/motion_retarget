@@ -44,6 +44,22 @@ DATASETBASE_ARGUMENTS = {
 }
 
 
+def get_dataloader(phase, config):
+
+    config.data.batch_size = config.batch_size
+    config.data.seq_len = config.seq_len
+    dataset_cls_name = config.data.train_cls if phase == 'train' else config.data.eval_cls
+    dataset_cls = getattr(thismodule, dataset_cls_name)
+    dataset = dataset_cls(phase, config.data)
+
+    dataloader = DataLoader(dataset, shuffle=(phase=='train'),
+                            batch_size=config.batch_size,
+                            num_workers=(config.data.num_workers if phase == 'train' else 1),
+                            worker_init_fn=lambda _: np.random.seed(),
+                            drop_last=True)
+
+    return dataloader
+
 class AnimDataset(Dataset):
 
     def __init__(self, transforms=None, pre_transforms=None, *args, **kwargs):
@@ -322,6 +338,9 @@ class AnimDataset(Dataset):
             data = self.transforms(data)
 
         return data
+
+
+
 
 
 if __name__ == '__main__':

@@ -23,6 +23,8 @@ from lib.util.general import weights_init, get_model_list, get_scheduler
 from lib.network import Discriminator
 from lib.operation import rotate_and_maybe_project
 
+from data import get_dataloader
+
 # Define defaults here
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 8
@@ -63,6 +65,9 @@ class Trainer(nn.Module):
         self.angles = torch.tensor(angles).float().cuda()
         self.rotation_axes = torch.tensor(config.rotation_axes).float().cuda()
         self.rotation_axes_mask = [(_ > 0) for _ in config.rotation_axes]
+
+    def train(self):
+        # @TODO move transmomo train.py here
 
     def forward(self, data):
         x_a, x_b = data["x_a"], data["x_b"]
