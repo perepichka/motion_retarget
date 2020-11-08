@@ -12,18 +12,21 @@ class ConvEncoder(nn.Module):
     @classmethod
     def build_from_config(cls, config):
         conv_pool = None if config.conv_pool is None else getattr(nn, config.conv_pool)
-        encoder = cls(config.channels, config.padding, config.kernel_size, config.conv_stride, conv_pool)
+        global_pool = None if config.global_pool is None else getattr(nn, config.global_pool)
+        encoder = cls(config.channels, config.padding, config.kernel_size, config.conv_stride, conv_pool, global_pool)
         return encoder
 
-    def __init__(self, channels, padding=3, kernel_size=8, conv_stride=2, conv_pool=None):
+    def __init__(self, channels, padding=3, kernel_size=8, conv_stride=2, conv_pool=None, global_pool=None):
         super(ConvEncoder, self).__init__()
 
         self.in_channels = channels[0]
+        self.global_pool = getattr(F, config.body_encoder.global_pool) if global_pool is not None else None
 
         model = []
         acti = nn.LeakyReLU(0.2)
 
         nr_layer = len(channels) - 1
+
 
         for i in range(nr_layer):
             if conv_pool is None:
@@ -41,6 +44,12 @@ class ConvEncoder(nn.Module):
     def forward(self, x):
         x = x[:, :self.in_channels, :]
         x = self.model(x)
+
+        # Final global pooling if required
+        if self.global_pool is not None:
+            kernel_size = body_code_seq.size(-1)
+            x = self.global_pool(x, kernel_size)
+
         return x
 
 
@@ -66,8 +75,7 @@ class ConvDecoder(nn.Module):
             if i == 0 or i == 1:
                 model.append(nn.Dropout(p=0.2))
             if not i == len(channels) - 2:
-                model.append(acti)          # whether to add tanh a last?
-                #model.append(nn.Dropout(p=0.2))
+                model.append(acti)
 
         self.model = nn.Sequential(*model)
 
@@ -86,6 +94,7 @@ class Discriminator(nn.Module):
 
 class Autoencoder3f(nn.Module):
 
+
     def __init__(self, config):
         super(Autoencoder3f, self).__init__()
 
@@ -99,32 +108,21 @@ class Autoencoder3f(nn.Module):
         body_cls = getattr(thismodule, config.body_encoder.cls)
         view_cls = getattr(thismodule, config.view_encoder.cls)
 
-        self.motion_encoder = motion_cls.build_from_config(config.motion_encoder)
-        self.body_encoder = body_cls.build_from_config(config.body_encoder)
-        self.view_encoder = view_cls.build_from_config(config.view_encoder)
+        self.encode_motion = motion_cls.build_from_config(config.motion_encoder)
+        self.encode_body = body_cls.build_from_config(config.body_encoder)
+        self.encode_view = view_cls.build_from_config(config.view_encoder)
+
         self.decoder = ConvDecoder.build_from_config(config.decoder)
 
-        self.body_pool = getattr(F, config.body_encoder.global_pool) if config.body_encoder.global_pool is not None else None
-        self.view_pool = getattr(F, config.view_encoder.global_pool) if config.view_encoder.global_pool is not None else None
 
     def forward(self, seqs):
+        motion_code = self.encode_motion(x)
+        body_code, _ = self.encode_body(x)
+        view_code, _ = self.encode_view(x)
+        out = self.decode(motion_code, body_code, view_code)
+        out = rotate_and_maybe_project(out, body_reference=self.body_reference, project_2d=True)
         return self.reconstruct(seqs)
 
-    def encode_motion(self, seqs):
-        motion_code_seq = self.motion_encoder(seqs)
-        return motion_code_seq
-
-    def encode_body(self, seqs):
-        body_code_seq = self.body_encoder(seqs)
-        kernel_size = body_code_seq.size(-1)
-        body_code = self.body_pool(body_code_seq, kernel_size)  if self.body_pool is not None else body_code_seq
-        return body_code, body_code_seq
-
-    def encode_view(self, seqs):
-        view_code_seq = self.view_encoder(seqs)
-        kernel_size = view_code_seq.size(-1)
-        view_code = self.view_pool(view_code_seq, kernel_size)  if self.view_pool is not None else view_code_seq
-        return view_code, view_code_seq
 
     def decode(self, motion_code, body_code, view_code):
         if body_code.size(-1) == 1:
@@ -135,63 +133,6 @@ class Autoencoder3f(nn.Module):
         out = self.decoder(complete_code)
         return out
 
-    def cross3d(self, x_a, x_b, x_c):
-        motion_a = self.encode_motion(x_a)
-        body_b, _ = self.encode_body(x_b)
-        view_c, _ = self.encode_view(x_c)
-        out = self.decode(motion_a, body_b, view_c)
-        return out
-
-    def cross2d(self, x_a, x_b, x_c):
-        motion_a = self.encode_motion(x_a)
-        body_b, _ = self.encode_body(x_b)
-        view_c, _ = self.encode_view(x_c)
-        out = self.decode(motion_a, body_b, view_c)
-        out = rotate_and_maybe_project(out, body_reference=self.body_reference, project_2d=True)
-        return out
-
-    def reconstruct3d(self, x):
-        motion_code = self.encode_motion(x)
-        body_code, _ = self.encode_body(x)
-        view_code, _ = self.encode_view(x)
-        out = self.decode(motion_code, body_code, view_code)
-        return out
-
-    def reconstruct2d(self, x):
-        motion_code = self.encode_motion(x)
-        body_code, _ = self.encode_body(x)
-        view_code, _ = self.encode_view(x)
-        out = self.decode(motion_code, body_code, view_code)
-        out = rotate_and_maybe_project(out, body_reference=self.body_reference, project_2d=True)
-        return out
-
-    def interpolate(self, x_a, x_b, N):
-
-        step_size = 1. / (N-1)
-        batch_size, _, seq_len = x_a.size()
-
-        motion_a = self.encode_motion(x_a)
-        body_a, body_a_seq = self.encode_body(x_a)
-        view_a, view_a_seq = self.encode_view(x_a)
-
-        motion_b = self.encode_motion(x_b)
-        body_b, body_b_seq = self.encode_body(x_b)
-        view_b, view_b_seq = self.encode_view(x_b)
-
-        batch_out = torch.zeros([batch_size, N, N, 2 * self.n_joints, seq_len])
-
-        for i in range(N):
-            motion_weight = i * step_size
-            for j in range(N):
-                body_weight = j * step_size
-                motion = (1. - motion_weight) * motion_a + motion_weight * motion_b
-                body = (1. - body_weight) * body_a + body_weight * body_b
-                view = (1. - body_weight) * view_a + body_weight * view_b
-                out = self.decode(motion, body, view)
-                out = rotate_and_maybe_project(out, body_reference=self.body_reference, project_2d=True)
-                batch_out[:, i, j, :, :] = out
-
-        return batch_out
 
 if __name__ == '__main__':
     pass
