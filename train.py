@@ -439,14 +439,6 @@ def create_args():
              'auto-generated',
         default=None
     )
-
-    # Database parameters
-    parser.add_argument(
-        'dataset',
-        type=str,
-        help='Dataset to use'
-    )
-    
    
     parser.add_argument(
         '--shuffle_data', '--do_shuffle',
@@ -467,42 +459,6 @@ def create_args():
         type=int,
         help='Size of a single batch.',
         default=DEFAULT_BATCH_SIZE
-    )
-    parser.add_argument(
-        '--normalize',
-        type=str2bool,
-        help='Normalize the input data',
-        default=True
-    )
-    parser.add_argument(
-        '--lr',
-        type=float,
-        help='Learning rate to use.',
-        default=1e-3
-    )
-    parser.add_argument(
-        '--momentum',
-        type=float,
-        help='Momentum to use (if applicable).',
-        default=0.0
-    )
-    parser.add_argument(
-        '--optimizer',
-        type=str,
-        help='Type of optimizer to use',
-        default='SGD'
-    )
-    parser.add_argument(
-        '--loss',
-        type=str,
-        help='Type of loss to use',
-        default='MSE'
-    )
-    parser.add_argument(
-        '--loss_reduction',
-        type=str,
-        help='Type of loss reduction to use',
-        default='mean'
     )
     parser.add_argument(
         '--seed',
@@ -589,7 +545,7 @@ if __name__ == '__main__':
     # Tries to create a trainer object
     try:
         trainer = Trainer(
-            #*args
+            args.config
         )
 
     except Exception as e:
