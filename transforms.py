@@ -14,9 +14,11 @@ from torch.utils.data import Dataset, DataLoader
 
 from visualize import visualize_mpl
 
+DEFAULT_REF_JOINTS = ['R_shoulder','L_shoulder','R_hip','L_hip']
 
 AXES = ['x', 'y', 'z']
 PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
+
 
 class _AnimTransform(nn.Module):
 
@@ -47,6 +49,7 @@ class LocalReferenceFrame(_AnimTransform):
             x = x[0]
         pass
 
+
 class To2D(nn.Module):
 
     def __init__(self, keep_dim=False, *args, **kwargs):
@@ -59,6 +62,28 @@ class To2D(nn.Module):
         self.keep_dim = keep_dim
 
     def forward(self, x):
+
+        if self.keep_dim:
+            return x[..., [1,2]]
+        else:
+            x[..., 0] = 0
+            return x
+
+class ToBasis(nn.Module):
+
+    def __init__(self, ref_joints=DEFAULT_REF_JOINTS, *args, **kwargs):
+        """Convert motion to basis vectors.
+
+        :param ref_joints: Reference joints.
+        
+        """
+        super().__init__(*args, **kwargs)
+
+        self.ref_joints = ref_joints
+
+    def forward(self, x):
+
+        ref_joint_indices = [self.joint_names.index(n) for n in self.ref_joints]
 
         if self.keep_dim:
             return x[..., [1,2]]

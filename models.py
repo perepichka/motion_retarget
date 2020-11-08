@@ -47,6 +47,7 @@ class ConvEncoder(nn.Module):
         self.model = nn.Sequential(*model)
 
     def forward(self, x):
+
         x = x[:, :self.in_channels, :]
         x = self.model(x)
 
