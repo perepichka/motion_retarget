@@ -1,1 +1,1 @@
-Nose,Neck,R_shoulder,R_elbow,R_wrist,L_shoulder,L_elbow,L_forearm,L_wrist,Mid_hip,R_hip,R_knee,R_ankle,L_hip,L_knee,L_anckle
+Nose,Neck,R_shoulder,R_elbow,R_wrist,L_shoulder,L_elbow,L_wrist,Mid_hip,R_hip,R_knee,R_ankle,L_hip,L_knee,L_ankle
