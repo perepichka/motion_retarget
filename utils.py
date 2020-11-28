@@ -10,6 +10,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
+from easydict import EasyDict as edict
+
 import yaml
 
 

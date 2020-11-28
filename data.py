@@ -48,9 +48,21 @@ def get_dataloader(phase, config):
 
     config.data.batch_size = config.batch_size
     config.data.seq_len = config.seq_len
-    dataset_cls_name = config.data.train_cls if phase == 'train' else config.data.eval_cls
-    dataset_cls = getattr(thismodule, dataset_cls_name)
+    #dataset_cls_name = config.data.train_cls if phase == 'train' else config.data.eval_cls
+    dataset_cls = getattr(thismodule, 'AnimDataset')
     dataset = dataset_cls(phase, config.data)
+
+    pre_transforms = torch.nn.Sequential(
+        ReplaceJoint('Mid_hip', ['R_hip', 'L_hip']),
+        ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder']),
+    )
+
+    transformations = torch.nn.Sequential(
+        IK(),
+        LimbScale(std=0.05),
+        FK(),
+        To2D(),
+    )
 
     dataloader = DataLoader(dataset, shuffle=(phase=='train'),
                             batch_size=config.batch_size,
@@ -59,6 +71,7 @@ def get_dataloader(phase, config):
                             drop_last=True)
 
     return dataloader
+
 
 class AnimDataset(Dataset):
 

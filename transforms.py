@@ -81,15 +81,23 @@ class ToBasis(nn.Module):
 
         self.ref_joints = ref_joints
 
+        assert len(self.ref_joints) == 4, "Unsupported amount of ref joints!"
+
     def forward(self, x):
 
-        ref_joint_indices = [self.joint_names.index(n) for n in self.ref_joints]
+        ind = [self.joint_names.index(n) for n in self.ref_joints]
 
-        if self.keep_dim:
-            return x[..., [1,2]]
-        else:
-            x[..., 0] = 0
-            return x
+        horiz = x[..., ind[0], :] - x[..., ind[1], :] + x[..., ind[2], :] - x[..., ind[2], :] 
+        horiz = horiz.mean(dim=-2)
+        horiz = horiz / horiz.norm(dim=-2)[..., None, :]
+
+        z = torch.Tensor([0,0,1], device=x.device, dtype=dtype)[None, ...].repeat(x.shape[0])
+        y = torch.cross(horiz, z)
+        y = y / y.norm(dim=-2)[..., None, :]
+        x = torch.cross(y,z)
+        out = torch.stack([x,y,z], dim=1).detach()
+
+        return out
 
 
 class ZeroRoot(_AnimTransform):

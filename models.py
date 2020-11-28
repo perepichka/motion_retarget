@@ -1,5 +1,8 @@
 """Module defining Transmomo models. """
 
+
+thismodule = sys.modules[__name__]
+
 import numpy as np
 import torch
 import torch.nn as nn

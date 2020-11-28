@@ -16,18 +16,24 @@ import time
 from tqdm import tqdm
 import tensorboardX
 
+from utils import get_config
+import models
+
 # Define defaults here
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 8
 
 class Trainer(nn.Module):
 
-    def __init__(self, config):
-        super(Trainer, self).__init__(config)
+    def __init__(self, config_file):
 
+        super(Trainer, self).__init__()
+
+        config = get_config(config_file)
         self.config = config
+
         lr = config.lr
-        autoencoder_cls = getattr(lib.network, config.autoencoder.cls)
+        autoencoder_cls = getattr(models, config.autoencoder.cls)
         self.autoencoder = autoencoder_cls(config.autoencoder)
         self.discriminator = Discriminator(config.discriminator)
 
