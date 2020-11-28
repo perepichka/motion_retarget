@@ -62,8 +62,14 @@ class Trainer(nn.Module):
         y_angles = view_angles if config.rotation_axes[2] else np.array([0])
         x_angles, z_angles, y_angles = np.meshgrid(x_angles, z_angles, y_angles)
         angles = np.stack([x_angles.flatten(), z_angles.flatten(), y_angles.flatten()], axis=1)
-        self.angles = torch.tensor(angles).float().cuda()
-        self.rotation_axes = torch.tensor(config.rotation_axes).float().cuda()
+        if self.config.use_gpu:
+            self.angles = torch.tensor(angles).float().cuda()
+        else:
+            self.angles = torch.tensor(angles).float()
+        if self.config.use_gpu:
+            self.rotation_axes = torch.tensor(config.rotation_axes).float().cuda()
+        else:
+            self.rotation_axes = torch.tensor(config.rotation_axes).float()
         self.rotation_axes_mask = [(_ > 0) for _ in config.rotation_axes]
 
     def train(self):
@@ -82,7 +88,8 @@ class Trainer(nn.Module):
         trainer = trainer_cls(config)
         trainer.cuda()
         '''
-        self.cuda()
+        if self.config.use_gpu:
+            self.cuda()
 
         '''
         if logger is not None: logger.log("loading data")
@@ -307,7 +314,10 @@ class Trainer(nn.Module):
             self.loss_triplet_v = 0
 
         # add all losses
-        self.loss_total = torch.tensor(0.).float().cuda()
+        if self.config.use_gpu:
+            self.loss_total = torch.tensor(0.).float().cuda()
+        else:
+            self.loss_total = torch.tensor(0.).float()
         self.loss_total += config.recon_x_w * self.loss_recon_x
         self.loss_total += config.cross_x_w * self.loss_cross_x
         self.loss_total += config.inv_v_ls_w * self.loss_inv_v_ls
