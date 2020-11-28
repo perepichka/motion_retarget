@@ -12,15 +12,15 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-DEFAULT_REF_JOINTS = ['R_shoulder','L_shoulder','R_hip','L_hip']
+DEFAULT_REF_JOINTS = ['R_shoulder', 'L_shoulder', 'R_hip', 'L_hip']
 
 AXES = ['x', 'y', 'z']
 PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
 
 DEFAULT_ANGLES = torch.tensor(
-    [ i * np.pi / 6 for i in range(-3, 4)], dtype=torch.float32
+    [i * np.pi / 6 for i in range(-3, 4)], dtype=torch.float32
 )
-DEFAULT_AXES = torch.tensor([0,0,1])
+DEFAULT_AXES = torch.tensor([0, 0, 1])
 
 
 class _AnimTransform(nn.Module):
@@ -29,10 +29,9 @@ class _AnimTransform(nn.Module):
         """Generic base animation transform."""
         super().__init__()
         self.ds = dataset
- 
-        for k,v in kwargs.items():
-            setattr(self, k, v)
 
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 
 class LocalReferenceFrame(_AnimTransform):
@@ -57,9 +56,8 @@ class To2D(nn.Module):
         self.keep_dim = keep_dim
 
     def forward(self, x):
-
         if not self.keep_dim:
-            return x[..., [1,2]]
+            return x[..., [1, 2]]
         else:
             x[..., 0] = 0
             return x
@@ -72,7 +70,7 @@ class RotateBasis(_AnimTransform):
 
         :param angles: Angles of rotation, shaped [3,3]
         :param angles: Axes of rotation, shaped [3]
-        
+
         """
         super().__init__(*args, **kwargs)
 
@@ -83,7 +81,6 @@ class RotateBasis(_AnimTransform):
         angles = torch.stack([x_angles.flatten(), z_angles.flatten(), y_angles.flatten()], dim=1)
         rand_int = torch.randint(0, angles.shape[0], (1,))[0]
         self.view_angles = angles[rand_int]
-
 
     def forward(self, data):
         print(self.view_angles.shape)
@@ -127,28 +124,25 @@ class ToBasis(_AnimTransform):
         assert len(self.ref_joints) == 4, "Unsupported amount of ref joints!"
 
     def forward(self, x):
-        
         ind = [self.ds.joint_names.index(n) for n in self.ref_joints]
         print(ind)
 
-        horiz = (x[..., ind[0], :] - x[..., ind[1], :] + x[..., ind[2], :] - x[..., ind[3], :])/2
+        horiz = (x[..., ind[0], :] - x[..., ind[1], :] + x[..., ind[2], :] - x[..., ind[3], :]) / 2
 
         while len(horiz.shape) > 1:
             horiz = torch.mean(horiz, dim=0)
 
         horiz = horiz / torch.norm(horiz)
 
+        z = torch.tensor([0, 0, 1], device=x.device, dtype=x.dtype)
+        # z = z[None, ...].repeat_interleave(x.shape[0], dim=0)
 
-        z = torch.tensor([0,0,1], device=x.device, dtype=x.dtype)
-        #z = z[None, ...].repeat_interleave(x.shape[0], dim=0)
-
-        #print(z.shape)
-
+        # print(z.shape)
         y = torch.cross(horiz, z)
-        y = y / torch.norm(y)#[..., None, :]
-        x = torch.cross(y,z)
+        y = y / torch.norm(y)  # [..., None, :]
+        x = torch.cross(y, z)
 
-        out = torch.stack([x,y,z], dim=1).detach()
+        out = torch.stack([x, y, z], dim=1).detach()
 
         return out
 
@@ -160,7 +154,6 @@ class ZeroRoot(_AnimTransform):
         super().__init__(*args, **kwargs)
 
     def forward(self, x):
-
         if type(x) == tuple:
             x = x[0]
         return x - x[0:1, :]
@@ -189,7 +182,6 @@ class LimbScale(_AnimTransform):
         if self.per_batch:
             self.noise = None
 
-
     def forward(self, x, *args, **kwargs):
         """Transformation function.
 
@@ -209,8 +201,8 @@ class LimbScale(_AnimTransform):
         elif self.per_batch:
             if self.noise is None:
                 # Creates arrays of random scaling
-                means = self.mean*torch.ones_like(x)
-                stds = self.std*torch.ones_like(x)
+                means = self.mean * torch.ones_like(x)
+                stds = self.std * torch.ones_like(x)
 
                 noise = torch.normal(means, stds)
                 self.noise = noise
@@ -218,14 +210,14 @@ class LimbScale(_AnimTransform):
                 noise = self.noise
         else:
             # Creates arrays of random scaling
-            means = self.mean*torch.ones_like(x)
-            stds = self.std*torch.ones_like(x)
+            means = self.mean * torch.ones_like(x)
+            stds = self.std * torch.ones_like(x)
 
             noise = torch.normal(means, stds)
 
         # Dont scale root
         noise[..., 0, :] = 0
-                
+
         return x + noise
 
 
@@ -234,7 +226,6 @@ class IK(_AnimTransform):
     def __init__(self, *args, **kwargs):
         """Inverse kinematics transform."""
         super().__init__(*args, **kwargs)
-
 
     def forward(self, x):
         """Transformation function.
@@ -248,10 +239,10 @@ class IK(_AnimTransform):
 
         local_x = torch.empty(x.shape)
         local_x[..., 0, :] = x[..., 0, :]
-        
+
         for index, parent_index in enumerate(self.parent_indices):
             if parent_index != -1:
-                local_x[..., index, :] = x[..., index, :] - x[..., parent_index, :] 
+                local_x[..., index, :] = x[..., index, :] - x[..., parent_index, :]
         return local_x
 
 
@@ -260,7 +251,7 @@ class FK(_AnimTransform):
     def __init__(self, *args, **kwargs):
         """Forward kinematics transform."""
         super().__init__(*args, **kwargs)
-        
+
     def forward(self, x):
         """Transformation function.
 
@@ -268,16 +259,15 @@ class FK(_AnimTransform):
 
         """
 
-
         if type(x) == tuple:
             x = x[0]
 
         global_x = torch.empty(x.shape)
         global_x[..., 0, :] = x[..., 0, :]
-        
+
         for index, parent_index in enumerate(self.ds.parent_indices):
             if parent_index != -1:
-                global_x[..., index, :] = x[..., index, :] + global_x[..., parent_index, :] 
+                global_x[..., index, :] = x[..., index, :] + global_x[..., parent_index, :]
         return global_x
 
 
@@ -293,7 +283,7 @@ class ReplaceJoint(_AnimTransform):
 
         self.rep_joint = rep_joint
         self.ref_joints = ref_joints
-        
+
     def forward(self, x):
         """Transformation function.
 
@@ -311,7 +301,7 @@ class ReplaceJoint(_AnimTransform):
             logging.error('Invalid reference/replacement joint specified!')
             raise e
 
-        x[..., rep_joint_index, :]= torch.mean(
+        x[..., rep_joint_index, :] = torch.mean(
             x[..., ref_joint_indices, :], dim=-2, keepdim=False
         )
 
@@ -354,7 +344,6 @@ class ScaleAnim(_AnimTransform):
         super().__init__(*args, **kwargs)
         self.amount = amount
 
-
     def forward(self, x):
         """Transformation function.
 
@@ -377,7 +366,6 @@ class NormalizeAnim(_AnimTransform):
         self.mean = mean
         self.std = std
 
-
     def forward(self, x):
         """Transformation function.
 
@@ -399,7 +387,6 @@ class DenormalizeAnim(_AnimTransform):
         self.mean = mean
         self.std = std
 
-
     def forward(self, x):
         """Transformation function.
 
@@ -415,7 +402,7 @@ class RotateAnim(_AnimTransform):
         """Rotates an animation around axes.
 
         :param basis: Change of basis parameter [3,3].
-        
+
         """
         self.basis = basis
         super().__init__(*args, **kwargs)
@@ -423,5 +410,3 @@ class RotateAnim(_AnimTransform):
     def forward(self, x):
         x = self.basis @ x
         return x
-
-
