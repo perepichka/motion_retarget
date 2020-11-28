@@ -51,8 +51,6 @@ def get_dataloader(path, config):
     config.data.batch_size = config.batch_size
     config.data.seq_len = config.seq_len
     dataset_cls = getattr(thismodule, 'AnimDataset')
-    dataset = dataset_cls(path)
-    # @FIXME @TODO Actually use the config instead of random stuff
 
     pre_transforms = torch.nn.Sequential(
         ReplaceJoint('Mid_hip', ['R_hip', 'L_hip']),
@@ -65,6 +63,9 @@ def get_dataloader(path, config):
         #FK(),
         #To2D(),
     )
+
+    dataset = dataset_cls(path, transforms=transformations, pre_transforms=pre_transforms)
+    # @FIXME @TODO Actually use the config instead of random stuff
 
     dataloader = DataLoader(dataset, shuffle=(phase=='train'),
                             batch_size=config.batch_size,
