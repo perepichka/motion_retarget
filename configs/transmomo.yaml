@@ -1,3 +1,4 @@
+use_gpu: False
 trainer: TransmomoTrainer
 K: 3
 rotation_axes: &rotation_axes [0, 0, 1] # horizontal, depth, vertical
