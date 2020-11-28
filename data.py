@@ -61,7 +61,7 @@ def get_dataloader(path, config):
         #IK(),
         #LimbScale(std=0.05),
         #FK(),
-        #To2D(),
+        To2D(),
     )
 
     dataset = dataset_cls(path, transforms=transformations, pre_transforms=pre_transforms)
@@ -163,7 +163,7 @@ class AnimDataset(Dataset):
             raise Exception('No data to precompute transforms on')
 
         
-        self._frames_transformed = self.transforms((self._frames, self._anim_ranges))
+        self._frames_transformed = self.pre_transforms(self._frames)
 
 
     def save(self, path=None):
