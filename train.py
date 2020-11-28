@@ -27,6 +27,7 @@ from data import get_dataloader
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 8
 
+
 class Trainer(nn.Module):
 
     def __init__(self, config_file):
@@ -49,7 +50,7 @@ class Trainer(nn.Module):
         self.dis_opt = torch.optim.Adam([p for p in dis_params if p.requires_grad],
                                         lr=lr, betas=(beta1, beta2), weight_decay=config.weight_decay)
         self.ae_opt = torch.optim.Adam([p for p in ae_params if p.requires_grad],
-                                        lr=lr, betas=(beta1, beta2), weight_decay=config.weight_decay)
+                                       lr=lr, betas=(beta1, beta2), weight_decay=config.weight_decay)
         self.dis_scheduler = get_scheduler(self.dis_opt, config)
         self.ae_scheduler = get_scheduler(self.ae_opt, config)
 
@@ -79,42 +80,42 @@ class Trainer(nn.Module):
             cudnn.benchmark = True
 
         # Load experiment setting
-        #if opts.preload: config.data.preload = True
+        # if opts.preload: config.data.preload = True
         max_iter = self.config.max_iter
 
         # Setup model and data loader
-        #trainer_cls = getattr(lib.trainer, config.trainer)
-        #trainer = trainer_cls(config)
-        #trainer.cuda()
+        # trainer_cls = getattr(lib.trainer, config.trainer)
+        # trainer = trainer_cls(config)
+        # trainer.cuda()
 
         if self.config.use_gpu:
             self.cuda()
 
-        #if logger is not None: logger.log("loading data")
-        #train_loader = get_dataloader("train", config)
-        #val_loader = get_dataloader("test", config)
+        # if logger is not None: logger.log("loading data")
+        # train_loader = get_dataloader("train", config)
+        # val_loader = get_dataloader("test", config)
         train_loader = get_dataloader('./data/mixamo/36_800_24/train', self.config)
-        val_loader = get_dataloader('./data/mixamo/36_800_24/valid', self.config)
+        val_loader = get_dataloader('./data/mixamo/36_800_24/test', self.config)
 
         # Setup logger and output folders
-        #train_writer = tensorboardX.SummaryWriter(os.path.join(opts.out_dir, config.name, "logs"))
-        #checkpoint_directory = os.path.join(opts.out_dir, config.name, 'checkpoints')
+        # train_writer = tensorboardX.SummaryWriter(os.path.join(opts.out_dir, config.name, "logs"))
+        # checkpoint_directory = os.path.join(opts.out_dir, config.name, 'checkpoints')
         checkpoint_directory = "some directory"
         # @FIXME hook up directory info
-        #os.makedirs(checkpoint_directory, exist_ok=True)
-        #shutil.copy(opts.config, os.path.join(opts.out_dir, config.name, "config.yaml"))  # copy config file to output folder
+        # os.makedirs(checkpoint_directory, exist_ok=True)
+        # shutil.copy(opts.config, os.path.join(opts.out_dir, config.name, "config.yaml"))  # copy config file to output folder
 
         checkpoint_directory = "some directory"
 
         # Start training
-        #iterations = trainer.resume(checkpoint_directory, config=config) if opts.resume else 0
+        # iterations = trainer.resume(checkpoint_directory, config=config) if opts.resume else 0
         iterations = 0
 
         pbar = tqdm(total=max_iter)
         pbar.set_description(self.config.name)
         pbar.update(iterations)
         print("%s: training started" % self.config.name)
-        #if logger is not None: logger.log("training started")
+        # if logger is not None: logger.log("training started")
 
         start = time.time()
 
@@ -182,8 +183,20 @@ class Trainer(nn.Module):
 
     def dis_update(self, data, config):
 
-        x_a = data["x"].detach()
-        x_s = data["x_s"].detach()  # the limb-scaled version of x_a
+        if self.config.use_gpu:
+            '''
+            x_a = data["x"].detach()
+            x_s = data["x_s"].detach()  # the limb-scaled version of x_a
+            '''
+            x_a = data.squeeze().detach()
+            x_s = data.squeeze().detach()
+        else:
+            '''
+            x_a = data["x"]
+            x_s = data["x_s"]  # the limb-scaled version of x_a
+            '''
+            x_a = data.squeeze()
+            x_s = data.squeeze()
 
         self.dis_opt.zero_grad()
 
@@ -404,6 +417,7 @@ class Trainer(nn.Module):
         autoencoder.train()
         return re_dict
 
+
 # ====================================== #
 # Code for creating/storing experiments
 # ====================================== #
@@ -453,7 +467,7 @@ def load_args(args, path):
             keys = lines[::2]
             vals = lines[1::2]
 
-            for k,v in zip(keys, vals):
+            for k, v in zip(keys, vals):
                 setattr(args, k, v)
     # @TODO implement custom exception handling if necessary
     except FileNotFoundError as e:
@@ -464,6 +478,7 @@ def load_args(args, path):
         raise
 
     return args
+
 
 def create_experiment(args):
     """Creates an experiment directory with arguments.
@@ -512,7 +527,6 @@ def create_experiment(args):
     return exp_dir
 
 
-
 def create_args():
     """Creates arguments for training."""
 
@@ -539,7 +553,7 @@ def create_args():
              'auto-generated',
         default=None
     )
-   
+
     parser.add_argument(
         '--shuffle_data', '--do_shuffle',
         type=str2bool,
@@ -599,6 +613,7 @@ def create_args():
 
     return parser
 
+
 if __name__ == '__main__':
 
     # Parse arguments from command-line
@@ -647,4 +662,3 @@ if __name__ == '__main__':
     trainer = Trainer(args.config)
     # Train the model
     trainer.train()
-
