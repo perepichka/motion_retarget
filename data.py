@@ -21,7 +21,7 @@ from PIL import Image
 
 
 DEFAULT_MIXAMO_TRAIN = './data/mixamo/36_800_24/train'
-DEFAULT_MIXAMO_VALID = './data/mixamo/36_800_24/valid'
+DEFAULT_MIXAMO_TEST = './data/mixamo/36_800_24/test'
 DEFAULT_SOLODANCE_TRAIN = './data/solo_dance/train'
 DEFAULT_STATS_PATH = '../'
 
@@ -64,13 +64,12 @@ def get_dataloader(path, config):
         To2D(),
     )
 
-    dataset = dataset_cls(path, transforms=transformations, pre_transforms=pre_transforms)
+    dataset = dataset_cls(path=path, transforms=transformations, pre_transforms=pre_transforms)
     # @FIXME @TODO Actually use the config instead of random stuff
 
-    dataloader = DataLoader(dataset, shuffle=(phase=='train'),
+    dataloader = DataLoader(dataset, shuffle=False,
                             batch_size=config.batch_size,
-                            num_workers=(config.data.num_workers if phase == 'train' else 1),
-                            worker_init_fn=lambda _: np.random.seed(),
+                            num_workers=(config.data.num_workers),
                             drop_last=True)
 
     return dataloader
