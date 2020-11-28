@@ -1,4 +1,5 @@
 """Module defining Transmomo models. """
+import sys
 
 
 thismodule = sys.modules[__name__]
@@ -20,7 +21,7 @@ class ConvEncoder(nn.Module):
     @classmethod
     def build_from_config(cls, config):
         conv_pool = None if config.conv_pool is None else getattr(nn, config.conv_pool)
-        global_pool = None if config.global_pool is None else getattr(nn, config.global_pool)
+        global_pool = None if config.global_pool is None else getattr(F, config.global_pool)
         encoder = cls(config.channels, config.padding, config.kernel_size, config.conv_stride, conv_pool, global_pool)
         return encoder
 
@@ -28,7 +29,7 @@ class ConvEncoder(nn.Module):
         super(ConvEncoder, self).__init__()
 
         self.in_channels = channels[0]
-        self.global_pool = getattr(F, config.body_encoder.global_pool) if global_pool is not None else None
+        self.global_pool = global_pool
 
         model = []
         acti = nn.LeakyReLU(0.2)
@@ -94,11 +95,48 @@ class ConvDecoder(nn.Module):
 
 class Discriminator(nn.Module):
 
-    def __init__(self, *args, **kwargs):
-        pass
+    def __init__(self, config):
+        super(Discriminator, self).__init__()
+        self.gan_type = config.gan_type
+        encoder_cls = getattr(thismodule, config.encoder_cls)
+        self.encoder = encoder_cls.build_from_config(config)
+        self.linear = nn.Linear(config.channels[-1], 1)
 
-    def forward(self, x):
-        pass
+    def forward(self, seqs):
+
+        code_seq = self.encoder(seqs)
+        logits = self.linear(code_seq.permute(0, 2, 1))
+        return logits
+
+    def calc_dis_loss(self, x_gen, x_real):
+
+        fake_logits = self.forward(x_gen)
+        real_logits = self.forward(x_real)
+
+        if self.gan_type == 'lsgan':
+            loss = torch.mean((fake_logits - 0) ** 2) + torch.mean((real_logits - 1) ** 2)
+        elif self.gan_type == 'nsgan':
+            all0 = torch.zeros_like(fake_logits, requires_grad=False)
+            all1 = torch.ones_like(real_logits, requires_grad=False)
+            loss = torch.mean(F.binary_cross_entropy(F.sigmoid(fake_logits), all0) +
+                              F.binary_cross_entropy(F.sigmoid(real_logits), all1))
+        else:
+            raise NotImplementedError
+
+        return loss
+
+    def calc_gen_loss(self, x_gen):
+
+        logits = self.forward(x_gen)
+        if self.gan_type == 'lsgan':
+            loss = torch.mean((logits - 1) ** 2)
+        elif self.gan_type == 'nsgan':
+            all1 = torch.ones_like(logits, requires_grad=False)
+            loss = torch.mean(F.binary_cross_entropy(F.sigmoid(logits), all1))
+        else:
+            raise NotImplementedError
+
+        return loss
 
 
 class Autoencoder3f(nn.Module):

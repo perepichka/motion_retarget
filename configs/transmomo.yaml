@@ -50,6 +50,7 @@ autoencoder:
     kernel_size: 8
     conv_stride: 2
     conv_pool: null
+    global_pool: null
   body_encoder:
     cls: ConvEncoder
     channels: [28, 64, 128, 256]
@@ -78,6 +79,7 @@ discriminator:
   kernel_size: 8
   conv_stride: 2
   conv_pool: null
+  global_pool: null
 
 body_discriminator:
   gan_type: lsgan

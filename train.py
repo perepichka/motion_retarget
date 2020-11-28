@@ -17,6 +17,8 @@ from tqdm import tqdm
 import tensorboardX
 
 from utils import get_config
+from utils import get_scheduler
+from utils import weights_init
 import models
 
 # Define defaults here
@@ -35,7 +37,7 @@ class Trainer(nn.Module):
         lr = config.lr
         autoencoder_cls = getattr(models, config.autoencoder.cls)
         self.autoencoder = autoencoder_cls(config.autoencoder)
-        self.discriminator = Discriminator(config.discriminator)
+        self.discriminator = models.Discriminator(config.discriminator)
 
         # Setup the optimizers
         beta1 = config.beta1
