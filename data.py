@@ -1,5 +1,7 @@
 """Module for processing animation data."""
+
 import sys, os, glob
+thismodule = sys.modules[__name__]
 
 from tqdm import tqdm
 import logging
@@ -44,13 +46,13 @@ DATASETBASE_ARGUMENTS = {
 }
 
 
-def get_dataloader(phase, config):
+def get_dataloader(path, config):
 
     config.data.batch_size = config.batch_size
     config.data.seq_len = config.seq_len
-    #dataset_cls_name = config.data.train_cls if phase == 'train' else config.data.eval_cls
     dataset_cls = getattr(thismodule, 'AnimDataset')
-    dataset = dataset_cls(phase, config.data)
+    dataset = dataset_cls(path)
+    # @FIXME @TODO Actually use the config instead of random stuff
 
     pre_transforms = torch.nn.Sequential(
         ReplaceJoint('Mid_hip', ['R_hip', 'L_hip']),
@@ -58,10 +60,10 @@ def get_dataloader(phase, config):
     )
 
     transformations = torch.nn.Sequential(
-        IK(),
-        LimbScale(std=0.05),
-        FK(),
-        To2D(),
+        #IK(),
+        #LimbScale(std=0.05),
+        #FK(),
+        #To2D(),
     )
 
     dataloader = DataLoader(dataset, shuffle=(phase=='train'),
@@ -109,6 +111,10 @@ class AnimDataset(Dataset):
 
         self._anim_ranges = []
         self._anim_info = []
+
+        # Stats
+        self.mean = None
+        self.std = None
 
         # Set up transforms
         self.transforms = transforms
@@ -309,28 +315,17 @@ class AnimDataset(Dataset):
         """Passes updated info to data transforms"""
 
         for k,v in self.transforms._modules.items():
-            v._anim_ranges = self._anim_ranges
-            v._anim_info = self._anim_info
-            v.joint_names = self.joint_names
-            v.parent_indices = self.parent_indices
-            v.root_joint = self.root_joint
-            v.num_joints = self.num_joints
-            v.num_frames = self.num_frames
+            v.ds = self
         for k,v in self.pre_transforms._modules.items():
-            v._anim_ranges = self._anim_ranges
-            v._anim_info = self._anim_info
-            v.joint_names = self.joint_names
-            v.parent_indices = self.parent_indices
-            v.root_joint = self.root_joint
-            v.num_joints = self.num_joints
-            v.num_frames = self.num_frames
+            v.ds = self
 
 
     def compute_stats(self):
-        """Computes statistics info."""
-        
-        self.
+        """Computes statistics on database."""
 
+        logging.info('Computing statistics...')
+
+        pass
 
 
     def __len__(self):
@@ -355,11 +350,10 @@ class AnimDataset(Dataset):
 
 
 
-
 if __name__ == '__main__':
 
     logging.basicConfig(
-        level=logging.DEBUG, 
+        level=logging.INFO, 
         format='%(asctime)s [%(levelname)s] %(message)s',
         handlers=[
             logging.FileHandler('data.log'),
@@ -373,20 +367,20 @@ if __name__ == '__main__':
     )
 
     transformations = torch.nn.Sequential(
-        IK(),
-        LimbScale(std=0.05),
-        FK(),
-        To2D(),
+        #IK(),
+        #LimbScale(std=0.05),
+        #FK(),
+        #To2D(),
     )
+
 
     ds = AnimDataset(transforms=transformations, pre_transforms=pre_transforms)
 
-    ds.save()
-    
-    #ds.precompute_transforms()
+    #ds.save()
+
 
     dl = DataLoader(ds, batch_size=256)
     
     for i, pose in enumerate(dl):
-        pass
-        #visualize_mpl(pose)
+    
+        visualize_mpl(pose, show_basis=True, ds=ds)
