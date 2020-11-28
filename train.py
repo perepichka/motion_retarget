@@ -93,8 +93,8 @@ class Trainer(nn.Module):
         #if logger is not None: logger.log("loading data")
         #train_loader = get_dataloader("train", config)
         #val_loader = get_dataloader("test", config)
-        train_loader = get_dataloader("train", self.config)
-        val_loader = get_dataloader("test", self.config)
+        train_loader = get_dataloader('./data/mixamo/36_800_24/train', self.config)
+        val_loader = get_dataloader('./data/mixamo/36_800_24/valid', self.config)
 
         # Setup logger and output folders
         #train_writer = tensorboardX.SummaryWriter(os.path.join(opts.out_dir, config.name, "logs"))
