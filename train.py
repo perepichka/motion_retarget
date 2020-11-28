@@ -21,6 +21,8 @@ from utils import get_scheduler
 from utils import weights_init
 import models
 
+from data import get_dataloader
+
 # Define defaults here
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 8
@@ -73,45 +75,40 @@ class Trainer(nn.Module):
         self.rotation_axes_mask = [(_ > 0) for _ in config.rotation_axes]
 
     def train(self):
-        cudnn.benchmark = True
+        if self.config.use_gpu:
+            cudnn.benchmark = True
 
-        '''
         # Load experiment setting
-        if opts.preload: config.data.preload = True
-        max_iter = config.max_iter
-        '''
+        #if opts.preload: config.data.preload = True
         max_iter = self.config.max_iter
 
         # Setup model and data loader
-        '''
-        trainer_cls = getattr(lib.trainer, config.trainer)
-        trainer = trainer_cls(config)
-        trainer.cuda()
-        '''
+        #trainer_cls = getattr(lib.trainer, config.trainer)
+        #trainer = trainer_cls(config)
+        #trainer.cuda()
+
         if self.config.use_gpu:
             self.cuda()
 
-        '''
-        if logger is not None: logger.log("loading data")
-        train_loader = get_dataloader("train", config)
-        val_loader = get_dataloader("test", config)
-        '''
+        #if logger is not None: logger.log("loading data")
+        #train_loader = get_dataloader("train", config)
+        #val_loader = get_dataloader("test", config)
         train_loader = get_dataloader("train", self.config)
         val_loader = get_dataloader("test", self.config)
-        '''
-        # Setup logger and output folders
-        train_writer = tensorboardX.SummaryWriter(os.path.join(opts.out_dir, config.name, "logs"))
-        checkpoint_directory = os.path.join(opts.out_dir, config.name, 'checkpoints')
-        os.makedirs(checkpoint_directory, exist_ok=True)
-        shutil.copy(opts.config,
-                    os.path.join(opts.out_dir, config.name, "config.yaml"))  # copy config file to output folder
-        '''
-        # @FIXME hook up directory info
-        checkpoint_directory = "some directory"
-        # Start training
-        #iterations = self.resume(checkpoint_directory, config=self.config) if opts.resume else 0
-        iterations = 0
 
+        # Setup logger and output folders
+        #train_writer = tensorboardX.SummaryWriter(os.path.join(opts.out_dir, config.name, "logs"))
+        #checkpoint_directory = os.path.join(opts.out_dir, config.name, 'checkpoints')
+        checkpoint_directory = "some directory"
+        # @FIXME hook up directory info
+        #os.makedirs(checkpoint_directory, exist_ok=True)
+        #shutil.copy(opts.config, os.path.join(opts.out_dir, config.name, "config.yaml"))  # copy config file to output folder
+
+        checkpoint_directory = "some directory"
+
+        # Start training
+        #iterations = trainer.resume(checkpoint_directory, config=config) if opts.resume else 0
+        iterations = 0
 
         pbar = tqdm(total=max_iter)
         pbar.set_description(self.config.name)
@@ -125,7 +122,8 @@ class Trainer(nn.Module):
 
             for it, data in enumerate(train_loader):
 
-                data = to_gpu(data)
+                if self.config.use_gpu:
+                    data = to_gpu(data)
 
                 # Main training code
                 self.dis_update(data, self.config)
@@ -144,20 +142,23 @@ class Trainer(nn.Module):
                         data = [batch[key] for batch in val_batches]
                         if isinstance(data[0], torch.Tensor):
                             val_data[key] = torch.cat(data, dim=0)
-                    val_data = to_gpu(val_data)
+                    if self.config.use_gpu:
+                        val_data = to_gpu(val_data)
                     self.validate(val_data, self.config)
 
-                '''                # Dump training stats in log file
+                '''    
+                # Dump training stats in log file
                 if (iterations + 1) % config.log_iter == 0:
                     if logger is not None:
                         elapsed = (time.time() - start) / 3600.0
                         logger.log("training %6d/%6d, elapsed: %.2f hrs" % (iterations + 1, max_iter, elapsed))
                     write_loss(iterations, trainer, train_writer)
                 '''
-
                 # Save network weights
+                '''
                 if (iterations + 1) % self.config.snapshot_save_iter == 0:
                     trainer.save(checkpoint_directory, iterations)
+                '''
 
                 iterations += 1
                 pbar.update(1)
@@ -644,6 +645,6 @@ if __name__ == '__main__':
     # Tries to create a trainer object
 
     trainer = Trainer(args.config)
-
     # Train the model
+    trainer.train()
 
