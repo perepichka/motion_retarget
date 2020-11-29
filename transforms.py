@@ -6,6 +6,7 @@ from tqdm import tqdm
 import logging
 
 import numpy as np
+import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -86,7 +87,6 @@ class RotateBasis(_AnimTransform):
 
 
     def forward(self, data):
-        print(self.view_angles.shape)
         cx, cy, cz = torch.cos(self.view_angles)
         sx, sy, sz = torch.sin(self.view_angles)
 
@@ -97,8 +97,6 @@ class RotateBasis(_AnimTransform):
             [-x[1], x[0], 0]
         ], dtype=torch.float32)
         x = x.reshape(-1, 1)
-        print(type(data))
-        print(type(x))
         mat33_x = cx * torch.eye(3) + sx * x_cpm + (1.0 - cx) * torch.matmul(x, x.T)
 
         mat33_z = torch.tensor([
@@ -129,7 +127,6 @@ class ToBasis(_AnimTransform):
     def forward(self, x):
         
         ind = [self.ds.joint_names.index(n) for n in self.ref_joints]
-        print(ind)
 
         horiz = (x[..., ind[0], :] - x[..., ind[1], :] + x[..., ind[2], :] - x[..., ind[3], :])/2
 
@@ -268,7 +265,6 @@ class FK(_AnimTransform):
 
         """
 
-
         if type(x) == tuple:
             x = x[0]
 
@@ -316,6 +312,52 @@ class ReplaceJoint(_AnimTransform):
         )
 
         return x
+
+
+class ToWindows(_AnimTransform):
+
+    def __init__(self, window_size, stride, *args, **kwargs):
+        """Transforms animation data to sliding windows of data.
+
+        :param window_size: Size of window in frames.
+        :param stride: Size of stride in frames.
+        
+        """
+        super().__init__(*args, **kwargs)
+        self.window_size = window_size
+        self.stride = stride
+
+
+    def forward(self, x):
+        """Transformation function.
+
+        :param x: Input animation data.
+
+        """
+
+        assert self.ds != None, "Need dataset for this transformation!"
+
+        assert x.shape[0] == self.ds._frames.shape[0], "This transformation can only be done as a pre-transform"
+
+        num_windows = 0
+        for r in self.ds._anim_ranges:
+
+            seq_length = (r[1] - r[0])
+            out_size = math.floor((seq_length - self.window_size)/self.stride)+1
+            num_windows += out_size
+
+        x_new = torch.empty([num_windows, self.window_size, self.ds.num_joints, 3])
+
+        index = 0
+        for r in self.ds._anim_ranges:
+            length = r[1] - r[0] 
+            if length < self.window_size:
+                continue
+            for start in range(0, length-self.window_size, self.stride):
+                seq = x[r[0]+start:r[0]+start+self.window_size]
+                x_new[index] = seq
+                index+=1
+        return x_new
 
 
 class FlipAxis(_AnimTransform):
