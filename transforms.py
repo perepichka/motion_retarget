@@ -63,6 +63,19 @@ class To2D(nn.Module):
             x[..., 0] = 0
             return x
 
+class ToFeatureVector(nn.Module):
+
+    def __init__(self, *args, **kwargs):
+        """To feature vector.
+        
+        """
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x):
+        x = x.reshape(x.shape[:-2] + (x.shape[-2] * x.shape[-1],))
+        return x
+
+
 
 class RotateBasis(_AnimTransform):
 
@@ -305,7 +318,7 @@ class ReplaceJoint(_AnimTransform):
         return x
 
 
-class ToWindows(_AnimTransform):
+class SlidingWindow(_AnimTransform):
 
     def __init__(self, window_size, stride, *args, **kwargs):
         """Transforms animation data to sliding windows of data.

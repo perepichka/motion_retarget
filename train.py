@@ -98,8 +98,8 @@ class Trainer(nn.Module):
         # if logger is not None: logger.log("loading data")
         # train_loader = get_dataloader("train", config)
         # val_loader = get_dataloader("test", config)
-        train_loader = get_dataloader('./data/mixamo/36_800_24/train', self.config)
-        val_loader = get_dataloader('./data/mixamo/36_800_24/test', self.config)
+        train_loader, train_ds = get_dataloader('./data/mixamo/36_800_24/train', self.config)
+        val_loader, val_ds = get_dataloader('./data/mixamo/36_800_24/test', self.config)
 
         # Setup logger and output folders
         # train_writer = tensorboardX.SummaryWriter(os.path.join(opts.out_dir, config.name, "logs"))
@@ -131,8 +131,8 @@ class Trainer(nn.Module):
                     data = to_gpu(data)
 
                 # Main training code
-                self.dis_update(data, self.config)
-                self.ae_update(data, self.config)
+                self.dis_update(data, self.config, train_ds)
+                self.ae_update(data, self.config, train_ds)
 
                 self.update_learning_rate()
 
@@ -188,26 +188,28 @@ class Trainer(nn.Module):
         self.train()
         return x_ab, x_ba
 
-    def dis_update(self, data, config):
+    def dis_update(self, data, config, ds):
 
         if self.config.use_gpu:
             '''
             x_a = data["x"].detach()
             x_s = data["x_s"].detach()  # the limb-scaled version of x_a
             '''
-            #.reshape(data.shape[0], data.shape[-1]*data.shape[-2])
-            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1).detach()
-            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1).detach()
+
+            x_a = data.permute(0, 2, 1).detach()
+            x_s = data.permute(0, 2, 1).detach()
+
         else:
             '''
             x_a = data["x"]
             x_s = data["x_s"]  # the limb-scaled version of x_a
             '''
-            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1)
-            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1)
+            x_a = data.permute(0, 2, 1)
+            x_s = data.permute(0, 2, 1)
 
-        meanpose = torch.cat([data.mean(dim=0).squeeze(),data.mean(dim=0).squeeze()[:, 0:1]], dim=-1)
-        stdpose =  torch.cat([data.std(dim=0).squeeze(),data.std(dim=0).squeeze()[:, 0:1]], dim=-1)
+
+        meanpose = ds.mean
+        stdpose = ds.std
 
         self.dis_opt.zero_grad()
 
@@ -248,25 +250,25 @@ class Trainer(nn.Module):
         self.loss_dis_total.backward()
         self.dis_opt.step()
 
-    def ae_update(self, data, config):
+    def ae_update(self, data, config, ds):
         if self.config.use_gpu:
             '''
             x_a = data["x"].detach()
             x_s = data["x_s"].detach()  # the limb-scaled version of x_a
             '''
-            # .reshape(data.shape[0], data.shape[-1]*data.shape[-2])
-            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1).detach()
-            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1).detach()
+            x_a = data.permute(0, 2, 1).detach()
+            x_s = data.permute(0, 2, 1).detach()
         else:
             '''
             x_a = data["x"]
             x_s = data["x_s"]  # the limb-scaled version of x_a
             '''
-            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1)
-            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1)
+            x_a = data.permute(0, 2, 1)
+            x_s = data.permute(0, 2, 1)
 
-        meanpose = torch.cat([data.mean(dim=0).squeeze(),data.mean(dim=0).squeeze()[:, 0:1]], dim=-1)
-        stdpose =  torch.cat([data.std(dim=0).squeeze(),data.std(dim=0).squeeze()[:, 0:1]], dim=-1)
+
+        meanpose = ds.mean
+        stdpose = ds.std
 
         self.ae_opt.zero_grad()
 

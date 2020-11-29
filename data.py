@@ -23,7 +23,7 @@ from PIL import Image
 DEFAULT_MIXAMO_TRAIN = './data/mixamo/36_800_24/train'
 DEFAULT_MIXAMO_TEST = './data/mixamo/36_800_24/test'
 DEFAULT_SOLODANCE_TRAIN = './data/solo_dance/train'
-DEFAULT_STATS_PATH = '../'
+DEFAULT_STATS_PATH = './data/mixamo/36_800_24/'
 
 DEFAULT_DS_FILE = 'ds.pt'
 DEFAULT_JOINTS_FILE = 'joints.txt'
@@ -55,6 +55,7 @@ def get_dataloader(path, config):
     pre_transforms = torch.nn.Sequential(
         ReplaceJoint('Mid_hip', ['R_hip', 'L_hip']),
         ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder']),
+        SlidingWindow(config.seq_len, config.stride)
     )
 
     transformations = torch.nn.Sequential(
@@ -62,6 +63,7 @@ def get_dataloader(path, config):
         #LimbScale(std=0.05),
         #FK(),
         To2D(),
+        ToFeatureVector(),
     )
 
     dataset = dataset_cls(path=path, transforms=transformations, pre_transforms=pre_transforms)
@@ -72,7 +74,7 @@ def get_dataloader(path, config):
                             num_workers=(config.data.num_workers),
                             drop_last=True)
 
-    return dataloader
+    return dataloader, dataset
 
 
 class AnimDataset(Dataset):
@@ -112,10 +114,6 @@ class AnimDataset(Dataset):
         self._anim_ranges = []
         self._anim_info = []
 
-        # Stats
-        self.mean = None
-        self.std = None
-
         # Set up transforms
         self.transforms = transforms
         self.pre_transforms = pre_transforms
@@ -123,6 +121,9 @@ class AnimDataset(Dataset):
         # Loads data if needed
         if self.path is not None:
             self.load()
+
+        if self._reload:
+            self.save()
 
         # Sends loaded info to transforms
         self._update_transforms()
@@ -162,7 +163,7 @@ class AnimDataset(Dataset):
             raise Exception('No data to precompute transforms on')
 
         
-        self._frames_transformed = self.pre_transforms(self._frames)
+        self._frames = self.pre_transforms(self._frames)
 
 
     def save(self, path=None):
@@ -278,16 +279,17 @@ class AnimDataset(Dataset):
                     if self.num_joints == 0:
                         self.num_joints = anim.shape[-2]
 
-                    self.num_frames += anim.shape[0]
-                    self.num_anims += 1
 
                     stored_anims.append(anim)
                     self._anim_ranges.append(
-                        (self.num_frames-1, self.num_frames-1+anim.shape[0])
+                        (self.num_frames, self.num_frames+anim.shape[0])
                     )
                     self._anim_info.append(
                             {'character': character, 'anim_name': anim_name, 'take': take}
                     )
+
+                    self.num_frames += anim.shape[0]
+                    self.num_anims += 1
 
         # Makes sure we have loaded animations           
         if len(stored_anims) == 0:
@@ -319,13 +321,40 @@ class AnimDataset(Dataset):
         for k,v in self.pre_transforms._modules.items():
             v.ds = self
 
-
     def compute_stats(self):
         """Computes statistics on database."""
 
         logging.info('Computing statistics...')
 
         pass
+
+    @property
+    def mean(self):
+        """Returns mean animation pose."""
+
+        meanpose_path = os.path.join(self.stats_path, 'meanpose.npy')
+
+        if os.path.exists(meanpose_path):
+            # @FIXME @TODO redo stats computation, this projection from 2d to 3d
+            # is absurd (leftover from their code)
+            mean2d = torch.from_numpy(np.load(meanpose_path))
+            return torch.stack([mean2d[:,0], mean2d[:,0], mean2d[:,1]], dim=1).type(torch.float32)
+        else:
+            raise Exception('Invalid mean path : {}'.format(meanpose_path))
+
+    @property
+    def std(self):
+        """Returns std animation pose."""
+
+        stdpose_path = os.path.join(self.stats_path, 'stdpose.npy')
+
+        if os.path.exists(stdpose_path):
+            # @FIXME @TODO redo stats computation, this projection from 2d to 3d
+            # is absurd (leftover from their code)
+            std2d = torch.from_numpy(np.load(stdpose_path))
+            return torch.stack([std2d[:,0], std2d[:,0], std2d[:,1]], dim=1).type(torch.float32)
+        else:
+            raise Exception('Invalid std path : {}'.format(stdpose_path))
 
 
     def __len__(self):
@@ -345,6 +374,8 @@ class AnimDataset(Dataset):
         if self.transforms is not None:
             data = self.transforms(data)
 
+        data = data.squeeze()
+        
         return data
 
 
@@ -364,6 +395,7 @@ if __name__ == '__main__':
     pre_transforms = torch.nn.Sequential(
         ReplaceJoint('Mid_hip', ['R_hip', 'L_hip']),
         ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder']),
+        SlidingWindow(64, 32)
     )
 
     transformations = torch.nn.Sequential(
@@ -382,5 +414,6 @@ if __name__ == '__main__':
     dl = DataLoader(ds, batch_size=256)
     
     for i, pose in enumerate(dl):
+        print(pose.shape)
     
         visualize_mpl(pose, show_basis=True, ds=ds)
