@@ -51,17 +51,16 @@ class ConvEncoder(nn.Module):
         self.model = nn.Sequential(*model)
 
     def forward(self, x):
-
         x = x[:, :self.in_channels, :]
         x = self.model(x)
 
         # Final global pooling if required
         if self.global_pool is not None:
-            kernel_size = body_code_seq.size(-1)
-            x = self.global_pool(x, kernel_size)
+            kernel_size = x.size(-1)
+            x_pool = self.global_pool(x, kernel_size)
+            return x_pool, x
 
         return x
-
 
 class ConvDecoder(nn.Module):
 

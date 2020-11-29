@@ -6,6 +6,7 @@ import shutil
 import os
 import logging
 
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -20,8 +21,11 @@ from utils import get_config
 from utils import get_scheduler
 from utils import weights_init
 import models
+from loss import *
 
 from data import get_dataloader
+
+from operation import rotate_and_maybe_project_learning
 
 # Define defaults here
 DEFAULT_NUM_EPOCHS = 50
@@ -163,9 +167,12 @@ class Trainer(nn.Module):
 
                 iterations += 1
                 pbar.update(1)
-                if iterations >= max_iter:
+
+                #if iterations >= max_iter:
+                if True:
                     print("training finished")
                     return
+
 
     def forward(self, data):
         x_a, x_b = data["x_a"], data["x_b"]
@@ -188,15 +195,19 @@ class Trainer(nn.Module):
             x_a = data["x"].detach()
             x_s = data["x_s"].detach()  # the limb-scaled version of x_a
             '''
-            x_a = data.squeeze().detach()
-            x_s = data.squeeze().detach()
+            #.reshape(data.shape[0], data.shape[-1]*data.shape[-2])
+            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1).detach()
+            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1).detach()
         else:
             '''
             x_a = data["x"]
             x_s = data["x_s"]  # the limb-scaled version of x_a
             '''
-            x_a = data.squeeze()
-            x_s = data.squeeze()
+            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1)
+            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1]*data.shape[-2])[...,None].repeat_interleave(64,dim=-1)
+
+        meanpose = torch.cat([data.mean(dim=0).squeeze(),data.mean(dim=0).squeeze()[:, 0:1]], dim=-1)
+        stdpose =  torch.cat([data.std(dim=0).squeeze(),data.std(dim=0).squeeze()[:, 0:1]], dim=-1)
 
         self.dis_opt.zero_grad()
 
@@ -216,8 +227,7 @@ class Trainer(nn.Module):
         angles = angles.unsqueeze(0).unsqueeze(2)  # [B=1, K, T=1, 3]
 
         X_a_recon = self.autoencoder.decode(motion_a, body_a, view_a)
-        x_a_trans = rotate_and_maybe_project(X_a_recon, angles=angles, body_reference=config.autoencoder.body_reference,
-                                             project_2d=True)
+        x_a_trans = rotate_and_maybe_project_learning(X_a_recon, meanpose, stdpose, angles=angles, body_reference=config.autoencoder.body_reference, project_2d=True)
 
         x_a_exp = x_a.repeat_interleave(config.K, dim=0)
 
@@ -225,7 +235,7 @@ class Trainer(nn.Module):
 
         if config.trans_gan_ls_w > 0:
             X_s_recon = self.autoencoder.decode(motion_s, body_s, view_s)
-            x_s_trans = rotate_and_maybe_project(X_s_recon, angles=angles,
+            x_s_trans = rotate_and_maybe_project_learning(X_s_recon, meanpose, stdpose, angles=angles,
                                                  body_reference=config.autoencoder.body_reference, project_2d=True)
             x_s_exp = x_s.repeat_interleave(config.K, dim=0)
             self.loss_dis_trans_ls = self.discriminator.calc_dis_loss(x_s_trans.detach(), x_s_exp)
@@ -239,9 +249,25 @@ class Trainer(nn.Module):
         self.dis_opt.step()
 
     def ae_update(self, data, config):
+        if self.config.use_gpu:
+            '''
+            x_a = data["x"].detach()
+            x_s = data["x_s"].detach()  # the limb-scaled version of x_a
+            '''
+            # .reshape(data.shape[0], data.shape[-1]*data.shape[-2])
+            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1).detach()
+            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1).detach()
+        else:
+            '''
+            x_a = data["x"]
+            x_s = data["x_s"]  # the limb-scaled version of x_a
+            '''
+            x_a = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1)
+            x_s = data.squeeze().reshape(data.shape[0], data.shape[-1] * data.shape[-2])[..., None].repeat_interleave(64, dim=-1)
 
-        x_a = data["x"].detach()
-        x_s = data["x_s"].detach()
+        meanpose = torch.cat([data.mean(dim=0).squeeze(),data.mean(dim=0).squeeze()[:, 0:1]], dim=-1)
+        stdpose =  torch.cat([data.std(dim=0).squeeze(),data.std(dim=0).squeeze()[:, 0:1]], dim=-1)
+
         self.ae_opt.zero_grad()
 
         # encode
@@ -268,11 +294,11 @@ class Trainer(nn.Module):
 
         # reconstruction
         X_a_recon = self.autoencoder.decode(motion_a, body_a, view_a)
-        x_a_recon = rotate_and_maybe_project(X_a_recon, angles=None, body_reference=config.autoencoder.body_reference,
+        x_a_recon = rotate_and_maybe_project_learning(X_a_recon, meanpose, stdpose, angles=None, body_reference=config.autoencoder.body_reference,
                                              project_2d=True)
 
         X_s_recon = self.autoencoder.decode(motion_s, body_s, view_s)
-        x_s_recon = rotate_and_maybe_project(X_s_recon, angles=None, body_reference=config.autoencoder.body_reference,
+        x_s_recon = rotate_and_maybe_project_learning(X_s_recon, meanpose, stdpose, angles=None, body_reference=config.autoencoder.body_reference,
                                              project_2d=True)
 
         self.loss_recon_x = 0.5 * self.recon_criterion(x_a_recon, x_a) + \
@@ -280,11 +306,11 @@ class Trainer(nn.Module):
 
         # cross reconstruction
         X_as_recon = self.autoencoder.decode(motion_a, body_s, view_s)
-        x_as_recon = rotate_and_maybe_project(X_as_recon, angles=None, body_reference=config.autoencoder.body_reference,
+        x_as_recon = rotate_and_maybe_project_learning(X_as_recon, meanpose, stdpose, angles=None, body_reference=config.autoencoder.body_reference,
                                               project_2d=True)
 
         X_sa_recon = self.autoencoder.decode(motion_s, body_a, view_a)
-        x_sa_recon = rotate_and_maybe_project(X_sa_recon, angles=None, body_reference=config.autoencoder.body_reference,
+        x_sa_recon = rotate_and_maybe_project_learning(X_sa_recon, meanpose, stdpose, angles=None, body_reference=config.autoencoder.body_reference,
                                               project_2d=True)
 
         self.loss_cross_x = 0.5 * self.recon_criterion(x_as_recon, x_s) + 0.5 * self.recon_criterion(x_sa_recon, x_a)
@@ -295,9 +321,9 @@ class Trainer(nn.Module):
         angles += self.angle_unit * self.rotation_axes * torch.randn([3], device=x_a.device)
         angles = angles.unsqueeze(0).unsqueeze(2)
 
-        x_a_trans = rotate_and_maybe_project(X_a_recon, angles=angles, body_reference=config.autoencoder.body_reference,
+        x_a_trans = rotate_and_maybe_project_learning(X_a_recon, meanpose, stdpose, angles=angles, body_reference=config.autoencoder.body_reference,
                                              project_2d=True)
-        x_s_trans = rotate_and_maybe_project(X_s_recon, angles=angles, body_reference=config.autoencoder.body_reference,
+        x_s_trans = rotate_and_maybe_project_learning(X_s_recon, meanpose, stdpose, angles=angles, body_reference=config.autoencoder.body_reference,
                                              project_2d=True)
 
         # GAN loss
