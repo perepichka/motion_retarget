@@ -13,6 +13,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
+from copy import deepcopy
+
+
+DEFAULT_REF_FRAME_JOINT = 'Mid_hip'
+
 DEFAULT_REF_JOINTS = ['R_shoulder', 'L_shoulder', 'R_hip', 'L_hip']
 
 AXES = ['x', 'y', 'z']
@@ -24,28 +29,104 @@ DEFAULT_ANGLES = torch.tensor(
 DEFAULT_AXES = torch.tensor([0, 0, 1])
 
 
+def generate_preprocessing_pipeline(view_angle, params=None):
+
+    pipeline = []
+    
+    if params is not None:
+        #@TODO add data augmentation here
+        pass
+
+    #@TODO Figure out basis here
+
+    pipeline.append(
+        ReplaceJoint('Mid_hip', ['R_hip', 'L_hip']),
+        ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder']),
+        FlipAxis('x'),
+        FlipAxis('y'),
+        ScaleAnim(128),
+    )
+
+    #pipeline.append(
+    # RotateAnim()
+    #)
+
+
+    return torch.nn.Sequential(pipeline)
+
+
+
+
 class _AnimTransform(nn.Module):
 
-    def __init__(self, dataset=None, *args, **kwargs):
-        """Generic base animation transform."""
+    def __init__(self, parallel_out=False, pass_along=True, dataset=None, clone=False, *args, **kwargs):
+        """Generic base animation transform.
+
+        :param parallel_out: Output the basis alongside the original data.
+        :param pass_along: Pass along all data this transform gets to subsequent transforms.
+        :param clone: Clone the data before passing it to transform.
+        :param dataset: (optional) Animation dataset.
+        
+        """
         super().__init__()
         self.ds = dataset
+        self.parallel_out = parallel_out
+        self.pass_along = pass_along
+        self.clone = clone
 
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+    def forward(self, data):
 
-class LocalReferenceFrame(_AnimTransform):
+        if type(data) == dict:
+            x = data['x']
+            kwargs = {k:v for k,v in data.items() if k != 'x'}
+        else:
+            x = data
+            kwargs = {}
 
+        if self.clone:
+            x = x.clone()
+
+        if len(x.shape) == 2:
+            x = x[None, ...]
+
+
+        out = self.transform(x, **kwargs)
+
+        if type(out) != dict:
+            out = {'x': out}
+        
+        if self.pass_along:
+            for k,v in out.items():
+                kwargs[k] = v
+
+            if len(kwargs) == 1:
+                return kwargs['x']
+            else:
+                return kwargs
+        else:
+            if len(out) == 1:
+                return out['x']
+            else:
+                return out
+
+
+    def transform(self, x, *args, **kwargs):
+        raise NotImplementedError
+
+
+class EmptyTransform(_AnimTransform):
     def __init__(self, *args, **kwargs):
-        """Local reference frame transform."""
+        """Transform that does nothing, for test purposes."""
         super().__init__(*args, **kwargs)
 
-    def forward(self, x):
-        pass
+    def transform(self, x, *args, **kwargs):
+        return x
 
 
-class To2D(nn.Module):
+class To2D(_AnimTransform):
 
     def __init__(self, keep_dim=False, *args, **kwargs):
         """Projects 3D animation to 2D.
@@ -56,14 +137,28 @@ class To2D(nn.Module):
         super().__init__(*args, **kwargs)
         self.keep_dim = keep_dim
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         if not self.keep_dim:
             return x[..., [1, 2]]
         else:
             x[..., 0] = 0
             return x
 
-class ToFeatureVector(nn.Module):
+class Permute(_AnimTransform):
+
+    def __init__(self, new_dims, *args, **kwargs):
+        """Implements permute operation.
+
+        :param new_dims: New dimmensions.
+        
+        """
+        super().__init__(*args, **kwargs)
+        self.new_dims = new_dims
+
+    def transform(self, x, *args, **kwargs):
+        return x.permute(self.new_dims)
+
+class ToFeatureVector(_AnimTransform):
 
     def __init__(self, *args, **kwargs):
         """To feature vector.
@@ -71,8 +166,23 @@ class ToFeatureVector(nn.Module):
         """
         super().__init__(*args, **kwargs)
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         x = x.reshape(x.shape[:-2] + (x.shape[-2] * x.shape[-1],))
+        return x
+
+
+class FromFeatureVector(_AnimTransform):
+
+    def __init__(self, *args, **kwargs):
+        """Back from feature vector.
+        
+        """
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        if self.ds is None:
+            raise Exception('Need dataset for this transform!')
+        x = x.reshape(x.shape[:-1], + (self.ds.num_joints, x.shape[-1]/self.ds.num_joints))
         return x
 
 
@@ -96,18 +206,31 @@ class RotateBasis(_AnimTransform):
         rand_int = torch.randint(0, angles.shape[0], (1,))[0]
         self.view_angles = angles[rand_int]
 
-    def forward(self, data):
-        cx, cy, cz = torch.cos(self.view_angles)
-        sx, sy, sz = torch.sin(self.view_angles)
+    def transform(self, x, basis=None, view_angles=None, *args, **kwargs):
 
-        x = data[0]
-        x_cpm = torch.tensor([
-            [0, -x[2], x[1]],
-            [x[2], 0, -x[0]],
-            [-x[1], x[0], 0]
-        ], dtype=torch.float32)
-        x = x.reshape(-1, 1)
-        mat33_x = cx * torch.eye(3) + sx * x_cpm + (1.0 - cx) * torch.matmul(x, x.T)
+        if basis is None:
+            basis = x
+
+        if view_angles is None:
+            view_angles = self.view_angles
+            
+        cx, cy, cz = torch.cos(view_angles)
+        sx, sy, sz = torch.sin(view_angles)
+
+        basis = basis.squeeze()
+        basis_0 = basis.squeeze()
+        basis_0 = basis[0]
+
+        basis_cpm = torch.tensor([
+            [0, -basis_0[2], basis_0[1]],
+            [basis_0[2], 0, -basis_0[0]],
+            [-basis_0[1], basis_0[0], 0]
+        ], dtype=torch.float)
+
+        #x_cpm = torch.cat([x_cpm_0, x_cpm_1, x_cpm_2, 
+            
+        basis_0 = basis_0.reshape(-1, 1)
+        mat33_x = cx * torch.eye(3) + sx * basis_cpm + (1.0 - cx) * torch.matmul(basis_0, basis_0.T)
 
         mat33_z = torch.tensor([
             [cz, sz, 0],
@@ -115,9 +238,12 @@ class RotateBasis(_AnimTransform):
             [0, 0, 1]
         ], dtype=torch.float32)
 
-        out = data @ mat33_x.T @ mat33_z
+        out = basis @ mat33_x.T @ mat33_z
 
-        return out
+        if self.parallel_out:
+            return {'x': x, 'basis': out}
+        else:
+            return out
 
 
 class ToBasis(_AnimTransform):
@@ -129,12 +255,13 @@ class ToBasis(_AnimTransform):
         
         """
         super().__init__(*args, **kwargs)
-
+        
         self.ref_joints = ref_joints
 
         assert len(self.ref_joints) == 4, "Unsupported amount of ref joints!"
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
+
         ind = [self.ds.joint_names.index(n) for n in self.ref_joints]
 
         horiz = (x[..., ind[0], :] - x[..., ind[1], :] + x[..., ind[2], :] - x[..., ind[3], :]) / 2
@@ -145,16 +272,17 @@ class ToBasis(_AnimTransform):
         horiz = horiz / torch.norm(horiz)
 
         z = torch.tensor([0, 0, 1], device=x.device, dtype=x.dtype)
-        # z = z[None, ...].repeat_interleave(x.shape[0], dim=0)
 
-        # print(z.shape)
         y = torch.cross(horiz, z)
         y = y / torch.norm(y)  # [..., None, :]
-        x = torch.cross(y, z)
+        x2 = torch.cross(y, z)
 
-        out = torch.stack([x, y, z], dim=1).detach()
-
-        return out
+        out = torch.stack([x2, y, z], dim=1).detach()
+        
+        if self.parallel_out:
+            return {'x': x, 'basis': out}
+        else:
+            return out
 
 
 class ZeroRoot(_AnimTransform):
@@ -163,7 +291,7 @@ class ZeroRoot(_AnimTransform):
         """Zeros out root."""
         super().__init__(*args, **kwargs)
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         if type(x) == tuple:
             x = x[0]
         return x - x[0:1, :]
@@ -192,7 +320,7 @@ class LimbScale(_AnimTransform):
         if self.per_batch:
             self.noise = None
 
-    def forward(self, x, *args, **kwargs):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
@@ -236,8 +364,8 @@ class IK(_AnimTransform):
     def __init__(self, *args, **kwargs):
         """Inverse kinematics transform."""
         super().__init__(*args, **kwargs)
-
-    def forward(self, x):
+    
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
@@ -250,7 +378,7 @@ class IK(_AnimTransform):
         local_x = torch.empty(x.shape)
         local_x[..., 0, :] = x[..., 0, :]
 
-        for index, parent_index in enumerate(self.parent_indices):
+        for index, parent_index in enumerate(self.ds.parent_indices):
             if parent_index != -1:
                 local_x[..., index, :] = x[..., index, :] - x[..., parent_index, :]
         return local_x
@@ -262,15 +390,12 @@ class FK(_AnimTransform):
         """Forward kinematics transform."""
         super().__init__(*args, **kwargs)
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
 
         """
-
-        if type(x) == tuple:
-            x = x[0]
 
         global_x = torch.empty(x.shape)
         global_x[..., 0, :] = x[..., 0, :]
@@ -279,6 +404,56 @@ class FK(_AnimTransform):
             if parent_index != -1:
                 global_x[..., index, :] = x[..., index, :] + global_x[..., parent_index, :]
         return global_x
+
+
+class LocalReferenceFrame(_AnimTransform):
+    def __init__(self, ref_joint=DEFAULT_REF_FRAME_JOINT,*args, **kwargs):
+        """Gets a local reference frame wrt some joint. Adds velocities.
+
+        :param ref_joint: Joint of reference.
+        
+        """
+        self.ref_joint = ref_joint
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        """Transformation function.
+
+        :param x: Input animation data.
+
+        """
+
+        rji = self.ds.joint_names.index(self.ref_joint)
+
+        centers = x[...,rji:rji+1, :]
+        x = x - centers
+
+        traj = torch.cat([
+            torch.zeros(centers.shape[:-3] + (1,) + centers.shape[-2:]),
+            centers[..., 1:, :, :] - centers[..., :1, :, :]],
+            dim=-3
+        )
+        x = torch.cat([x[...,:rji,:], traj, x[...,rji+1:,:]], dim=-2)
+        return x
+
+class GlobalReferenceFrame(_AnimTransform):
+    def __init__(self, ref_joint=DEFAULT_REF_FRAME_JOINT,*args, **kwargs):
+        """Opposite of local reference frame.
+
+        :param ref_joint: Joint of reference.
+        
+        """
+        self.ref_joint = ref_joint
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        """Transformation function.
+
+        :param x: Input animation data.
+
+        """
+
+        raise NotImplemented
 
 
 class ReplaceJoint(_AnimTransform):
@@ -294,7 +469,7 @@ class ReplaceJoint(_AnimTransform):
         self.rep_joint = rep_joint
         self.ref_joints = ref_joints
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
@@ -332,7 +507,7 @@ class SlidingWindow(_AnimTransform):
         self.stride = stride
 
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
@@ -345,22 +520,47 @@ class SlidingWindow(_AnimTransform):
 
         num_windows = 0
         for r in self.ds._anim_ranges:
-
             seq_length = (r[1] - r[0])
             out_size = math.floor((seq_length - self.window_size)/self.stride)+1
             num_windows += out_size
 
         x_new = torch.empty([num_windows, self.window_size, self.ds.num_joints, 3])
 
-        index = 0
-        for r in self.ds._anim_ranges:
-            length = r[1] - r[0] 
+        # New meta-info
+        anim_ranges_new = self.ds._anim_ranges.copy()
+        anim_structure_new = deepcopy(self.ds._anim_structure)
+        anim_info_new = deepcopy(self.ds._anim_info)
+
+        # Prune missing anims/characters
+        for i in range(len(anim_ranges_new) - 1, -1, -1):
+            length = anim_ranges_new[i][1] - anim_ranges_new[i][0] 
             if length < self.window_size:
-                continue
+                cn = anim_info_new[i]['character']
+                an = anim_info_new[i]['anim_name']
+                del anim_structure_new[cn][an]
+                del anim_ranges_new[i]
+                del anim_structure_new[i]
+
+        index = 0
+
+        for i, r in enumerate(anim_ranges_new):
+            length = r[1] - r[0] 
+            start_index = index
+            cn = anim_info_new[i]['character']
+            an = anim_info_new[i]['anim_name']
             for start in range(0, length-self.window_size, self.stride):
                 seq = x[r[0]+start:r[0]+start+self.window_size]
                 x_new[index] = seq
                 index+=1
+
+            # Update ranges and other info
+            anim_ranges_new[i] = (start_index,index)
+            anim_structure_new[cn][an] = (start_index,index)
+
+        self.ds._anim_ranges = np.array(anim_ranges_new)
+        self.ds._anim_info = anim_info_new
+        self.ds._anim_structure = anim_structure_new
+
         return x_new
 
 
@@ -377,9 +577,9 @@ class FlipAxis(_AnimTransform):
         if type(axis) == int:
             self.axis = axis
         elif type(axis) == str:
-            self.axis = AXIS[axis]
+            self.axis = AXES.index(axis)
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
@@ -400,7 +600,7 @@ class ScaleAnim(_AnimTransform):
         super().__init__(*args, **kwargs)
         self.amount = amount
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
@@ -408,6 +608,19 @@ class ScaleAnim(_AnimTransform):
         """
         x = self.amount * x
         return x
+
+
+class RandomScaleAnim(ScaleAnim):
+
+    def __init__(self, rng=(0.5, 1.5), *args, **kwargs):
+        """Random animation scaling.
+
+        :param rng: Range of uniform distribution to generate scaling factor.
+        
+        """
+        amount = np.random.uniform(rng[0], rng[1])
+        super().__init__(amount, *args, **kwargs)
+
 
 
 class NormalizeAnim(_AnimTransform):
@@ -422,13 +635,17 @@ class NormalizeAnim(_AnimTransform):
         self.mean = mean
         self.std = std
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
 
         """
-        return (x - self.mean) / self.std
+        if x.shape[-1] == 2 and self.mean.shape[-1] == 3:
+            return (x - self.mean[..., [0,2]]) / self.std[..., [0,2]]
+
+        else:
+            return (x - self.mean) / self.std
 
 
 class DenormalizeAnim(_AnimTransform):
@@ -443,7 +660,7 @@ class DenormalizeAnim(_AnimTransform):
         self.mean = mean
         self.std = std
 
-    def forward(self, x):
+    def transform(self, x, *args, **kwargs):
         """Transformation function.
 
         :param x: Input animation data.
@@ -452,17 +669,77 @@ class DenormalizeAnim(_AnimTransform):
         return (x * self.std) + self.mean
 
 
-class RotateAnim(_AnimTransform):
+class RotateAnimWithBasis(_AnimTransform):
 
-    def __init__(self, basis, *args, **kwargs):
+    def __init__(self, basis=None, *args, **kwargs):
         """Rotates an animation around axes.
 
-        :param basis: Change of basis parameter [3,3].
+        :param basis (optional): Change of basis parameter [3,3]. 
+        If not passsed at construction time, it should be passed later at runtime.
+
 
         """
         self.basis = basis
         super().__init__(*args, **kwargs)
 
-    def forward(self, x):
-        x = self.basis @ x
+    def transform(self, x, basis=None, *args, **kwargs):
+        if basis is None:
+            if self.basis is None:
+                raise Exception('No basis given!')
+            basis = self.basis
+        x = x.permute([0, 1, 3, 2])
+        x = basis @ x
+
+        x = x.permute([0, 1, 3, 2])
         return x
+
+
+class RotateAnim(_AnimTransform):
+
+    def __init__(self, euler_angles, *args, **kwargs):
+        """Rotates an animation.
+
+        :param euler: Euler angles.
+
+        """
+        self.euler_angles = euler_angles
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        cx, cy, cz = torch.cos(self.euler_angles)
+        sx, sy, sz = torch.sin(self.euler_angles)
+        mat33_x = torch.tensor([
+            [1, 0, 0],
+            [0, cx, -sx],
+            [0, sx, cx]
+        ], dtype=torch.float32)
+        mat33_y = torch.tensor([
+            [cy, 0, sy],
+            [0, 1, 0],
+            [-sy, 0, cy]
+        ], dtype=torch.float32)
+        mat33_z = torch.tensor([
+            [cz, -sz, 0],
+            [sz, cz, 0],
+            [0, 0, 1]
+        ], dtype=torch.float32)
+
+        x = x.permute([0,2,3,1])
+        res = mat33_x @ mat33_y @ mat33_z @ x
+        res = res.permute([0,3,1,2])
+
+        return res
+
+
+class RandomRotateAnim(RotateAnim):
+
+    def __init__(self, rng=((-np.pi/9, -np.pi/9, -np.pi/6), (np.pi/9, np.pi/9, np.pi/6)), *args, **kwargs):
+        """Random animation rotation.
+
+        :param rng: Range of uniform distribution to generate rotation factor.
+        
+        """
+        amount = torch.from_numpy(np.random.uniform(rng[0], rng[1]))
+        super().__init__(amount, *args, **kwargs)
+
+

@@ -168,8 +168,8 @@ class Trainer(nn.Module):
                 iterations += 1
                 pbar.update(1)
 
-                #if iterations >= max_iter:
-                if True:
+                #if True:
+                if iterations >= max_iter:
                     print("training finished")
                     return
 
@@ -189,23 +189,13 @@ class Trainer(nn.Module):
         return x_ab, x_ba
 
     def dis_update(self, data, config, ds):
-
+        #.permute(0, 2, 1)
         if self.config.use_gpu:
-            '''
-            x_a = data["x"].detach()
-            x_s = data["x_s"].detach()  # the limb-scaled version of x_a
-            '''
-
-            x_a = data.permute(0, 2, 1).detach()
-            x_s = data.permute(0, 2, 1).detach()
-
+            x_a = data['x'].detach()
+            x_s = data['x_s'].detach()
         else:
-            '''
-            x_a = data["x"]
-            x_s = data["x_s"]  # the limb-scaled version of x_a
-            '''
-            x_a = data.permute(0, 2, 1)
-            x_s = data.permute(0, 2, 1)
+            x_a = data['x'].detach()
+            x_s = data['x_s'].detach()
 
 
         meanpose = ds.mean
@@ -252,20 +242,11 @@ class Trainer(nn.Module):
 
     def ae_update(self, data, config, ds):
         if self.config.use_gpu:
-            '''
-            x_a = data["x"].detach()
-            x_s = data["x_s"].detach()  # the limb-scaled version of x_a
-            '''
-            x_a = data.permute(0, 2, 1).detach()
-            x_s = data.permute(0, 2, 1).detach()
+            x_a = data['x'].detach()
+            x_s = data['x_s'].detach()
         else:
-            '''
-            x_a = data["x"]
-            x_s = data["x_s"]  # the limb-scaled version of x_a
-            '''
-            x_a = data.permute(0, 2, 1)
-            x_s = data.permute(0, 2, 1)
-
+            x_a = data['x']
+            x_s = data['x_s']
 
         meanpose = ds.mean
         stdpose = ds.std
