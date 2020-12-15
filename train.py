@@ -17,9 +17,7 @@ import time
 from tqdm import tqdm
 import tensorboardX
 
-from utils import get_config
-from utils import get_scheduler
-from utils import weights_init
+from utils import get_config, get_scheduler, weights_init, to_gpu, write_loss, get_model_list
 import models
 from loss import *
 
@@ -31,15 +29,25 @@ from operation import rotate_and_maybe_project_learning
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 8
 
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler('train.log'),
+        logging.StreamHandler()
+    ]
+)
+
 
 class Trainer(nn.Module):
 
-    def __init__(self, config_file):
+    def __init__(self, config_file, args):
 
         super(Trainer, self).__init__()
 
         config = get_config(config_file)
         self.config = config
+        self.args = args
 
         lr = config.lr
         autoencoder_cls = getattr(models, config.autoencoder.cls)
@@ -84,7 +92,6 @@ class Trainer(nn.Module):
             cudnn.benchmark = True
 
         # Load experiment setting
-        # if opts.preload: config.data.preload = True
         max_iter = self.config.max_iter
 
         # Setup model and data loader
@@ -98,28 +105,24 @@ class Trainer(nn.Module):
         # if logger is not None: logger.log("loading data")
         # train_loader = get_dataloader("train", config)
         # val_loader = get_dataloader("test", config)
-        train_loader, train_ds = get_dataloader('./data/mixamo/36_800_24/train', self.config)
-        val_loader, val_ds = get_dataloader('./data/mixamo/36_800_24/test', self.config)
+        train_loader, train_ds = get_dataloader(self.config.data.train_dir, self.config)
+        val_loader, val_ds = get_dataloader(self.config.data.test_dir, self.config)
 
         # Setup logger and output folders
-        # train_writer = tensorboardX.SummaryWriter(os.path.join(opts.out_dir, config.name, "logs"))
-        # checkpoint_directory = os.path.join(opts.out_dir, config.name, 'checkpoints')
-        checkpoint_directory = "some directory"
-        # @FIXME hook up directory info
-        # os.makedirs(checkpoint_directory, exist_ok=True)
-        # shutil.copy(opts.config, os.path.join(opts.out_dir, config.name, "config.yaml"))  # copy config file to output folder
+        train_writer = tensorboardX.SummaryWriter(os.path.join(args.out_dir, self.config.name, "logs"))
+        checkpoint_directory = os.path.join(args.out_dir, self.config.name, 'checkpoints')
 
-        checkpoint_directory = "some directory"
+        os.makedirs(checkpoint_directory, exist_ok=True)
+        shutil.copy(args.config, os.path.join(args.out_dir, self.config.name, "config.yaml"))  # copy config file to output folder
 
         # Start training
-        # iterations = trainer.resume(checkpoint_directory, config=config) if opts.resume else 0
-        iterations = 0
+        iterations = trainer.resume(checkpoint_directory, config=self.config) if args.resume else 0
+        #iterations = 0
 
         pbar = tqdm(total=max_iter)
         pbar.set_description(self.config.name)
         pbar.update(iterations)
-        print("%s: training started" % self.config.name)
-        # if logger is not None: logger.log("training started")
+        logging.info("training started")
 
         start = time.time()
 
@@ -150,20 +153,24 @@ class Trainer(nn.Module):
                     if self.config.use_gpu:
                         val_data = to_gpu(val_data)
                     self.validate(val_data, self.config)
+                    val_iter = (iterations + 1) // self.config.val_iter
+                    max_val_iter = max_iter // self.config.val_iter
+                    elapsed = (time.time() - start) / 3600.0
+                    logging.info("validation cross body %6d/%6d, elapsed: %.2f hrs, loss: %.6f" % (val_iter, max_val_iter, elapsed, self.loss_val_cross_body))
+                    logging.info("validation recon x %6d/%6d, elapsed: %.2f hrs, loss: %.6f" % (val_iter, max_val_iter, elapsed, self.loss_val_recon_x))
+                    logging.info("validation total %6d/%6d, elapsed: %.2f hrs, loss: %.6f" % (val_iter, max_val_iter, elapsed, self.loss_val_total))
 
-                '''    
                 # Dump training stats in log file
-                if (iterations + 1) % config.log_iter == 0:
-                    if logger is not None:
-                        elapsed = (time.time() - start) / 3600.0
-                        logger.log("training %6d/%6d, elapsed: %.2f hrs" % (iterations + 1, max_iter, elapsed))
-                    write_loss(iterations, trainer, train_writer)
-                '''
+                if (iterations + 1) % self.config.log_iter == 0:
+                    elapsed = (time.time() - start) / 3600.0
+                    write_loss(iterations, self, train_writer)
+                    logging.info("training %6d/%6d, elapsed: %.2f hrs, loss: %.6f" % (iterations + 1, max_iter, elapsed, self.loss_total))
+
                 # Save network weights
-                '''
-                if (iterations + 1) % self.config.snapshot_save_iter == 0:
-                    trainer.save(checkpoint_directory, iterations)
-                '''
+                #if (iterations + 1) % self.config.snapshot_save_iter == 0:
+                #    trainer.save(checkpoint_directory, iterations)
+                if (iterations) % self.config.snapshot_save_iter == 0:
+                    self.save(checkpoint_directory, iterations)
 
                 iterations += 1
                 pbar.update(1)
@@ -200,6 +207,10 @@ class Trainer(nn.Module):
 
         meanpose = ds.mean
         stdpose = ds.std
+
+        if self.config.use_gpu:
+            meanpose = meanpose.cuda()
+            stdpose = stdpose.cuda()
 
         self.dis_opt.zero_grad()
 
@@ -250,6 +261,10 @@ class Trainer(nn.Module):
 
         meanpose = ds.mean
         stdpose = ds.std
+
+        if self.config.use_gpu:
+            meanpose = meanpose.cuda()
+            stdpose = stdpose.cuda()
 
         self.ae_opt.zero_grad()
 
@@ -398,6 +413,7 @@ class Trainer(nn.Module):
         for key, val in re_dict.items():
             setattr(self, key, val)
 
+
     @staticmethod
     def recon_criterion(input, target):
         return torch.mean(torch.abs(input - target))
@@ -407,6 +423,7 @@ class Trainer(nn.Module):
         autoencoder.eval()
         x_a, x_b = data["x_a"], data["x_b"]
         x_aba, x_bab = data["x_aba"], data["x_bab"]
+
         batch_size, _, seq_len = x_a.size()
 
         re_dict = {}
@@ -419,6 +436,7 @@ class Trainer(nn.Module):
             x_bab_recon = autoencoder.cross2d(x_b, x_a, x_b)
 
             re_dict['loss_val_recon_x'] = cls.recon_criterion(x_a_recon, x_a) + cls.recon_criterion(x_b_recon, x_b)
+
             re_dict['loss_val_cross_body'] = cls.recon_criterion(x_aba_recon, x_aba) + cls.recon_criterion(
                 x_bab_recon, x_bab)
             re_dict['loss_val_total'] = 0.5 * re_dict['loss_val_recon_x'] + 0.5 * re_dict['loss_val_cross_body']
@@ -562,6 +580,17 @@ def create_args():
              'auto-generated',
         default=None
     )
+    parser.add_argument(
+        '--out_dir',
+        help='Output directory',
+        default='out'
+    )
+    parser.add_argument(
+        '--resume',
+        help='Whether to resume experiment',
+        type=str2bool,
+        default=False
+    )
 
     parser.add_argument(
         '--shuffle_data', '--do_shuffle',
@@ -572,38 +601,13 @@ def create_args():
 
     # Training hyperparameters
     parser.add_argument(
-        '--epochs',
-        type=str,
-        help='Number of epochs to run for.',
-        default=DEFAULT_NUM_EPOCHS
-    )
-    parser.add_argument(
-        '--batch_size',
-        type=int,
-        help='Size of a single batch.',
-        default=DEFAULT_BATCH_SIZE
-    )
-    parser.add_argument(
         '--seed',
         type=int,
         help='Seed for numpy and pytorch random functions. Will default to '
              'random if not set',
-        default=1
+        default=-1
     )
 
-    # Saving/visualizing parameters
-    parser.add_argument(
-        '--save',
-        type=str2bool,
-        help='Whether or not to save the model at each epoch.',
-        default=True
-    )
-    parser.add_argument(
-        '--load',
-        type=str,
-        help='Path to saved model to load.',
-        default=None
-    )
 
     parser.add_argument(
         '--visualize',
@@ -630,6 +634,13 @@ if __name__ == '__main__':
 
     # Parse arguments
     args = parser.parse_args()
+
+    # Seeding
+    if args.seed != -1:
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        cudnn.deterministic = True
+        cudnn.benchmark = False
 
     # Make sure arguments of correct type
     # (this is only an issue when loading arguments from file)
@@ -668,6 +679,6 @@ if __name__ == '__main__':
     '''
     # Tries to create a trainer object
 
-    trainer = Trainer(args.config)
+    trainer = Trainer(args.config, args)
     # Train the model
     trainer.train()

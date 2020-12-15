@@ -126,6 +126,49 @@ class EmptyTransform(_AnimTransform):
         return x
 
 
+class InputData(_AnimTransform):
+    def __init__(self, name, value, *args, **kwargs):
+        """Transform that inputs data into a variable."""
+        self.name = name
+        self.value = value
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        if self.parallel_out:
+            out = {}
+            out['x'] = x
+            out[self.name] = self.value
+            return out
+        else:
+            return value
+
+class InputRandomData(_AnimTransform):
+    def __init__(self, name, rng, *args, **kwargs):
+        """Transform that inputs data into a variable."""
+        self.name = name
+        self.rng = rng
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        rand_data = torch.from_numpy(np.random.uniform(self.rng[0], self.rng[1]))
+        if self.parallel_out:
+            out = {}
+            out['x'] = x
+            out[self.name] = rand_data
+            return out
+        else:
+            return rand_data
+
+
+class Detach(_AnimTransform):
+    def __init__(self, *args, **kwargs):
+        """Transform that detaches the data."""
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        return x.detach()
+
+
 class To2D(_AnimTransform):
 
     def __init__(self, keep_dim=False, *args, **kwargs):
@@ -139,7 +182,8 @@ class To2D(_AnimTransform):
 
     def transform(self, x, *args, **kwargs):
         if not self.keep_dim:
-            return x[..., [1, 2]]
+            #return x[..., [1, 2]]
+            return x[..., [0, 2]]
         else:
             x[..., 0] = 0
             return x
@@ -245,6 +289,18 @@ class RotateBasis(_AnimTransform):
         else:
             return out
 
+class RandomRotateBasis(RotateBasis):
+
+    def __init__(self, rng=((-np.pi/9, -np.pi/9, -np.pi/6), (np.pi/9, np.pi/9, np.pi/6)), *args, **kwargs):
+        """Random animation rotation.
+
+        :param rng: Range of uniform distribution to generate rotation factor.
+        
+        """
+        amount = torch.from_numpy(np.random.uniform(rng[0], rng[1]))
+        super().__init__(amount, *args, **kwargs)
+
+
 
 class ToBasis(_AnimTransform):
 
@@ -265,6 +321,7 @@ class ToBasis(_AnimTransform):
         ind = [self.ds.joint_names.index(n) for n in self.ref_joints]
 
         horiz = (x[..., ind[0], :] - x[..., ind[1], :] + x[..., ind[2], :] - x[..., ind[3], :]) / 2
+    
 
         while len(horiz.shape) > 1:
             horiz = torch.mean(horiz, dim=0)
@@ -278,7 +335,14 @@ class ToBasis(_AnimTransform):
         x2 = torch.cross(y, z)
 
         out = torch.stack([x2, y, z], dim=1).detach()
-        
+
+        if torch.any(torch.isnan(out)):
+            print('BASIS IS NAN!')
+            print('------')
+            print(x.shape)
+            print(x.mean())
+            raise Exception
+
         if self.parallel_out:
             return {'x': x, 'basis': out}
         else:
@@ -299,7 +363,7 @@ class ZeroRoot(_AnimTransform):
 
 class LimbScale(_AnimTransform):
 
-    def __init__(self, mean=0, std=1, per_batch=False, *args, **kwargs):
+    def __init__(self, rng=[0.5, 2.0], symmetric=False, mean=0, std=1, *args, **kwargs):
         """Scales limbs. Note that data should be in local reference frame.
 
         :param mean: Mean of normal distribution for scaling.
@@ -310,15 +374,12 @@ class LimbScale(_AnimTransform):
 
         super().__init__(*args, **kwargs)
 
+        self.rng = rng
+        self.symmetric = symmetric
+
         # Scaling parameters
         self.mean = mean
         self.std = std
-
-        # Optional par
-        self.per_batch = per_batch
-
-        if self.per_batch:
-            self.noise = None
 
     def transform(self, x, *args, **kwargs):
         """Transformation function.
@@ -326,37 +387,20 @@ class LimbScale(_AnimTransform):
         :param x: Input animation data.
 
         """
-        if self.ds is not None:
+ 
+        # Creates arrays of random scaling
+        means = self.mean * torch.ones_like(x)
+        stds = self.std * torch.ones_like(x)
 
-            noise = torch.empty_like(x)
-            for r in self.ds._anim_ranges:
-                means = self.mean * torch.ones_like(x[r[0]:r[1]])
-                stds = self.std * torch.ones_like(means)
-                noise[r[0]:r[1]] = torch.normal(means, stds)
+        #scales = (self.rng[1] - self.rng[0]) * torch.normal(means, stds) + self.rng[0]
 
-            noise = torch.normal(means, stds)
-
-        elif self.per_batch:
-            if self.noise is None:
-                # Creates arrays of random scaling
-                means = self.mean * torch.ones_like(x)
-                stds = self.std * torch.ones_like(x)
-
-                noise = torch.normal(means, stds)
-                self.noise = noise
-            else:
-                noise = self.noise
-        else:
-            # Creates arrays of random scaling
-            means = self.mean * torch.ones_like(x)
-            stds = self.std * torch.ones_like(x)
-
-            noise = torch.normal(means, stds)
-
+        scales = (self.rng[1] - self.rng[0]) * torch.rand([x.shape[0], 1, x.shape[-2], 1]) + self.rng[0]
         # Dont scale root
-        noise[..., 0, :] = 0
+        scales[..., 0, :] = 0
 
-        return x + noise
+        x = scales * x
+
+        return x
 
 
 class IK(_AnimTransform):
@@ -519,12 +563,18 @@ class SlidingWindow(_AnimTransform):
         assert x.shape[0] == self.ds._frames.shape[0], "This transformation can only be done as a pre-transform"
 
         num_windows = 0
+        num_dims = x.shape[-1]
         for r in self.ds._anim_ranges:
             seq_length = (r[1] - r[0])
-            out_size = math.floor((seq_length - self.window_size)/self.stride)+1
-            num_windows += out_size
+            if seq_length < self.window_size:
+                continue
+            elif seq_length == self.window_size:
+                num_windows += 1
+            else:
+                out_size = math.floor((seq_length - self.window_size)/self.stride)+1
+                num_windows += out_size
 
-        x_new = torch.empty([num_windows, self.window_size, self.ds.num_joints, 3])
+        x_new = torch.empty([num_windows, self.window_size, self.ds.num_joints, num_dims])
 
         # New meta-info
         anim_ranges_new = self.ds._anim_ranges.copy()
@@ -541,14 +591,15 @@ class SlidingWindow(_AnimTransform):
                 del anim_ranges_new[i]
                 del anim_structure_new[i]
 
-        index = 0
 
+        index = 0
+        
         for i, r in enumerate(anim_ranges_new):
             length = r[1] - r[0] 
             start_index = index
             cn = anim_info_new[i]['character']
             an = anim_info_new[i]['anim_name']
-            for start in range(0, length-self.window_size, self.stride):
+            for start in range(0, (length+1)-self.window_size, self.stride):
                 seq = x[r[0]+start:r[0]+start+self.window_size]
                 x_new[index] = seq
                 index+=1
@@ -556,6 +607,8 @@ class SlidingWindow(_AnimTransform):
             # Update ranges and other info
             anim_ranges_new[i] = (start_index,index)
             anim_structure_new[cn][an] = (start_index,index)
+
+        assert index == x_new.shape[0], 'Something went wrong, not all windows are filled!'
 
         self.ds._anim_ranges = np.array(anim_ranges_new)
         self.ds._anim_info = anim_info_new
@@ -687,6 +740,9 @@ class RotateAnimWithBasis(_AnimTransform):
             if self.basis is None:
                 raise Exception('No basis given!')
             basis = self.basis
+        if len(x.shape) == 3:
+            x = x[None, ...]
+
         x = x.permute([0, 1, 3, 2])
         x = basis @ x
 

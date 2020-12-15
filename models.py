@@ -157,7 +157,6 @@ class Autoencoder3f(nn.Module):
         self.encode_motion = motion_cls.build_from_config(config.motion_encoder)
         self.encode_body = body_cls.build_from_config(config.body_encoder)
         self.encode_view = view_cls.build_from_config(config.view_encoder)
-
         self.decoder = ConvDecoder.build_from_config(config.decoder)
 
 
@@ -167,6 +166,7 @@ class Autoencoder3f(nn.Module):
         view_code, _ = self.encode_view(x)
         out = self.decode(motion_code, body_code, view_code)
         out = rotate_and_maybe_project(out, body_reference=self.body_reference, project_2d=True)
+        print('happens')
         return self.reconstruct(seqs)
 
 
@@ -178,6 +178,76 @@ class Autoencoder3f(nn.Module):
         complete_code = torch.cat([motion_code, body_code, view_code], dim=1)
         out = self.decoder(complete_code)
         return out
+
+    def cross3d(self, x_a, x_b, x_c):
+        motion_a = self.encode_motion(x_a)
+        body_b, _ = self.encode_body(x_b)
+        view_c, _ = self.encode_view(x_c)
+        out = self.decode(motion_a, body_b, view_c)
+        return out
+
+    def cross2d(self, x_a, x_b, x_c):
+        motion_a = self.encode_motion(x_a)
+        body_b, _ = self.encode_body(x_b)
+        view_c, _ = self.encode_view(x_c)
+        out = self.decode(motion_a, body_b, view_c)
+        batch_size, channels, seq_len = out.size()
+        n_joints = channels // 3
+        out = out.view(batch_size, n_joints, 3, seq_len)
+        out = out[:, :, [0, 2], :]
+        out = out.view(batch_size, n_joints * 2, seq_len)
+        return out
+
+    def reconstruct3d(self, x):
+        motion_code = self.encode_motion(x)
+        body_code, _ = self.encode_body(x)
+        view_code, _ = self.encode_view(x)
+        out = self.decode(motion_code, body_code, view_code)
+        return out
+
+    def reconstruct2d(self, x):
+        motion_code = self.encode_motion(x)
+        body_code, _ = self.encode_body(x)
+        view_code, _ = self.encode_view(x)
+        out = self.decode(motion_code, body_code, view_code)
+        batch_size, channels, seq_len = out.size()
+        n_joints = channels // 3
+        out = out.view(batch_size, n_joints, 3, seq_len)
+        out = out[:, :, [0, 2], :]
+        out = out.view(batch_size, n_joints * 2, seq_len)
+        return out
+
+    def interpolate(self, x_a, x_b, N):
+
+        step_size = 1. / (N-1)
+        batch_size, _, seq_len = x_a.size()
+
+        motion_a = self.encode_motion(x_a)
+        body_a, body_a_seq = self.encode_body(x_a)
+        view_a, view_a_seq = self.encode_view(x_a)
+
+        motion_b = self.encode_motion(x_b)
+        body_b, body_b_seq = self.encode_body(x_b)
+        view_b, view_b_seq = self.encode_view(x_b)
+
+        batch_out = torch.zeros([batch_size, N, N, 2 * self.n_joints, seq_len])
+
+        for i in range(N):
+            motion_weight = i * step_size
+            for j in range(N):
+                body_weight = j * step_size
+                motion = (1. - motion_weight) * motion_a + motion_weight * motion_b
+                body = (1. - body_weight) * body_a + body_weight * body_b
+                view = (1. - body_weight) * view_a + body_weight * view_b
+                out = self.decode(motion, body, view)
+                batch_size, channels, seq_len = out.size()
+                n_joints = channels // 3
+                out = out.view(batch_size, n_joints, 3, seq_len)
+                out = out[:, :, [0, 2], :]
+                out = out.view(batch_size, n_joints * 2, seq_len)
+                batch_out[:, i, j, :, :] = out
+
+        return batch_out
 
 
 if __name__ == '__main__':

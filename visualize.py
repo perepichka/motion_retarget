@@ -8,9 +8,6 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-import imageio
-from lib.util.visualization import motion2video
-
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -70,7 +67,6 @@ def visualize_mpl(data, show_basis=False, ds=None, fps=60, j_color='green', l_co
     plt.rcParams['figure.facecolor'] = b_color
 
     fig = plt.figure()
-
     if ndim == 3:
         ax = fig.add_subplot(111, projection='3d')
     elif ndim == 2:
@@ -173,7 +169,7 @@ def visualize_mpl(data, show_basis=False, ds=None, fps=60, j_color='green', l_co
         ax.set_xlim(x_min-x_std,x_max+x_std)
         ax.set_ylim(y_min-y_std,y_max+y_std)
 
-    plt.axis('off')
+    #plt.axis('off')
     plt.show()
 
     if save_path is not None:
