@@ -15,6 +15,10 @@ def rotate_and_maybe_project(x):
     # @FIXME REMOVE ONCE ITS ACTUALLY IMPLEMENTED
     return x
 
+def get_autoencoder(config):
+    ae_cls = getattr(thismodule, config.autoencoder.cls)
+    return ae_cls(config.autoencoder)
+
 
 class ConvEncoder(nn.Module):
 

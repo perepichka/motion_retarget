@@ -169,6 +169,29 @@ class Detach(_AnimTransform):
         return x.detach()
 
 
+class ToCPU(_AnimTransform):
+    def __init__(self, *args, **kwargs):
+        """Transform that pushes data to CPU."""
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        if x.is_cuda:
+            return x.cpu()
+        else:
+            return x
+
+class ToGPU(_AnimTransform):
+    def __init__(self, *args, **kwargs):
+        """Transform that pushes data to GPU."""
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        if torch.cuda.is_available():
+            return x.cuda()
+        else:
+            return x
+
+
 class To2D(_AnimTransform):
 
     def __init__(self, keep_dim=False, *args, **kwargs):
@@ -226,10 +249,22 @@ class FromFeatureVector(_AnimTransform):
     def transform(self, x, *args, **kwargs):
         if self.ds is None:
             raise Exception('Need dataset for this transform!')
-        x = x.reshape(x.shape[:-1], + (self.ds.num_joints, x.shape[-1]/self.ds.num_joints))
+        new_shape = x.shape[:-1] + (self.ds.num_joints, x.shape[-1]//self.ds.num_joints)
+        x = x.reshape(new_shape)
         return x
 
 
+class MultipleOfEight(_AnimTransform):
+
+    def __init__(self, *args, **kwargs):
+        """Forces number of frames to be a multiple of eight
+        
+        """
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        new_num_frames = (x.shape[-3]//8) * 8
+        return x[..., :new_num_frames, :, :]
 
 class RotateBasis(_AnimTransform):
 
@@ -480,7 +515,9 @@ class LocalReferenceFrame(_AnimTransform):
         x = torch.cat([x[...,:rji,:], traj, x[...,rji+1:,:]], dim=-2)
         return x
 
+
 class GlobalReferenceFrame(_AnimTransform):
+
     def __init__(self, ref_joint=DEFAULT_REF_FRAME_JOINT,*args, **kwargs):
         """Opposite of local reference frame.
 
@@ -497,7 +534,68 @@ class GlobalReferenceFrame(_AnimTransform):
 
         """
 
-        raise NotImplemented
+        rji = self.ds.joint_names.index(self.ref_joint)
+        
+        velocity = x[...,rji:rji+1, :]
+        integrated = torch.cumsum(velocity, dim=-3)
+
+        x[...,rji:rji+1, :] = integrated
+        x[...,:rji, :] = x[...,:rji, :] + integrated 
+        x[...,rji+1:, :] = x[...,rji+1:, :] + integrated 
+
+        return x
+
+class GetJoint(_AnimTransform):
+
+    def __init__(self, joint_name,*args, **kwargs):
+        """Returns data of a single joint.
+
+        :param ref_joint: Joint of reference.
+        
+        """
+        self.joint_name = joint_name
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        """Transformation function.
+
+        :param x: Input animation data.
+
+        """
+
+        rji = self.ds.joint_names.index(self.joint_name)
+        
+        return x[...,rji:rji+1, :]
+
+
+class GetFrame(_AnimTransform):
+
+    def __init__(self, req_frame, frame_dim=-3, *args, **kwargs):
+        """Returns data of a single frame.
+
+        :param frame: Frame to get.
+        :param frame_dim: Dimmension to get frame on.
+        
+        """
+        self.req_frame = req_frame
+        self.frame_dim = frame_dim
+
+        super().__init__(*args, **kwargs)
+
+    def transform(self, x, *args, **kwargs):
+        """Transformation function.
+
+        :param x: Input animation data.
+
+        """
+        
+        if self.frame_dim == -3:
+            return x[...,self.req_frame:self.req_frame+1,:,:]
+        elif self.frame_dim == -4:
+            return x[...,self.req_frame:self.freq_frame+1,:,:,:]
+        else:
+            raise Exception('Invalid frame dimmension!')
+
 
 
 class ReplaceJoint(_AnimTransform):
@@ -719,7 +817,12 @@ class DenormalizeAnim(_AnimTransform):
         :param x: Input animation data.
 
         """
-        return (x * self.std) + self.mean
+
+        if x.shape[-1] == 2 and self.mean.shape[-1] == 3:
+            return (x * self.std[..., [0,2]]) + self.mean[..., [0,2]]
+
+        else:
+            return (x * self.std) + self.mean
 
 
 class RotateAnimWithBasis(_AnimTransform):

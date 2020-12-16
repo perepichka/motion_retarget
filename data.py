@@ -54,7 +54,7 @@ DEFAULT_TRANSFORMS = torch.nn.Sequential(
 
 
 DATASETBASE_ARGUMENTS = {
-    'path': DEFAULT_SOLODANCE_TRAIN,
+    'path': './data/mixamo/36_800_24/test_random_rotate',
     'stats_path': DEFAULT_STATS_PATH,
     'joints_file': DEFAULT_JOINTS_FILE,
     'parents_file': DEFAULT_PARENTS_FILE,
@@ -92,12 +92,11 @@ def get_dataloader_test(path, config):
         RotateAnimWithBasis(pass_along=False),
     )
 
-
     num_workers=1
     dataset = MixamoDatasset(path=path, config=config, pre_transforms=pre_transforms, pre_anim_transforms=pre_anim)
     dataset.batch_size = 1
 
-    dataloader = DataLoader(dataset, batch_size=None, num_workers=8)
+    dataloader = DataLoader(dataset, batch_size=None, num_workers=num_workers)
 
     return dataloader, dataset
 
@@ -212,7 +211,6 @@ class AnimDataset(Dataset):
         # Preprocesses data if neeeded
         if self.pre_transforms is not None:
             self.precompute_transforms()
-        print('tst')
         if self.pre_anim_transforms is not None:
             self.compute_pre_anim_transforms()
         
@@ -245,14 +243,11 @@ class AnimDataset(Dataset):
 
         if self._frames is None or len(self._frames) == 0:
             raise Exception('No data to precompute transforms on')
-        print('pre-transform')
         self._frames = self.pre_transforms(self._frames)
-        print('pre-transform done')
 
     def compute_pre_anim_transforms(self):
         """Computes pre-anim transforms."""
 
-        print('happens')
         if self._frames is None or len(self._frames) == 0:
             raise Exception('No data to precompute transforms on')
         for rng in self._anim_ranges:
@@ -647,17 +642,6 @@ class MixamoDataset(AnimDataset):
         
         return data
 
-
-    def test_process(char, mot):
-        """Same as get_item, but only for a given char/motion. Used at test-time."""
-
-        rng = ds._anim_structure[char][mot]
-        data_11 = self._frames[rng[0]:rng[1], ...]
-
-    def test_unprocess(char, mot):
-        pass
-
-
     def _generate_preprocessing_pipeline(self):
         self.preprocess = torch.nn.Sequential(
             ToBasis(parallel_out=True, dataset=self),
@@ -908,6 +892,94 @@ class SoloDanceDataset(AnimDataset):
         self.transforms = torch.nn.Sequential(
         )
 
+class MixamoDatasetTest(AnimDataset):
+
+    def __init__(self, config=None, *args, **kwargs):
+        """Mixamo test-time animation dataset constructor.
+
+        """
+        super(MixamoDatasetTest, self).__init__(*args, **kwargs)
+
+        # Batch size should be handled by dataloader for validation dataset
+        self.batch_size = 1
+        
+        # Creates our pipelines
+        self._generate_preprocessing_pipeline()
+        self._generate_unprocessing_pipeline()
+        self._generate_start_pipeline()
+
+    def process(self, character_1, motion_1, character_2, motion_2):
+        """Process combination of characters."""
+
+        assert character_1 in self.characters, 'Character_1 {} must be in dataset!'.format(character_1)
+        assert character_2 in self.characters, 'Character_2 {} must be in dataset!'.format(character_2)
+        assert motion_1 in self.anim_names, 'Motion_1 {} must be in dataset!'.format(motion_1)
+        assert motion_2 in self.anim_names, 'Motion_2 {} must be in dataset!'.format(motion_2)
+
+        rng_1 = self._anim_structure[character_1][motion_1]
+        rng_2 = self._anim_structure[character_2][motion_2]
+
+        data_1 = self._frames[rng_1[0]:rng_1[1],...]
+        data_2 = self._frames[rng_2[0]:rng_2[1],...]
+
+        start_1 = self.get_start(data_1)
+        start_2 = self.get_start(data_2)
+
+        data_1_processed = self.preprocess(data_1)
+        data_2_processed = self.preprocess(data_2)
+
+        return {
+            'data_1': data_1_processed, 'data_2': data_2_processed,
+            'start_1': start_1, 'start_2': start_2
+        }
+
+
+    def unprocess(self, data_1, data_2, start_1, start_2):
+        """Process combination of characters."""
+
+        data_1_unprocessed = self.unpreprocess(data_1) + start_1
+        data_2_unprocessed = self.unpreprocess(data_2) + start_2
+
+        return {'data_1': data_1_unprocessed, 'data_2': data_2_unprocessed}
+
+
+    def _generate_preprocessing_pipeline(self):
+        self.preprocess = torch.nn.Sequential(
+            MultipleOfEight(clone=True),
+            FlipAxis('x'),
+            FlipAxis('z'),
+            To2D(),
+            ReplaceJoint('Mid_hip', ['R_hip', 'L_hip'], dataset=self),
+            ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder'], dataset=self),
+            LocalReferenceFrame(dataset=self),
+            NormalizeAnim(mean=self.mean, std=self.std, pass_along=False),
+            ToFeatureVector(dataset=self),
+            Permute([0,2,1]),
+            ToGPU(),
+        )
+
+    def _generate_unprocessing_pipeline(self):
+        self.unpreprocess = torch.nn.Sequential(
+            Detach(),
+            ToCPU(),
+            Permute([0,2,1]),
+            FromFeatureVector(dataset=self),
+            DenormalizeAnim(mean=self.mean, std=self.std),
+            GlobalReferenceFrame(dataset=self),
+        )
+
+    def _generate_start_pipeline(self):
+        self.get_start = torch.nn.Sequential(
+            MultipleOfEight(clone=True),
+            FlipAxis('x'),
+            FlipAxis('z'),
+            To2D(),
+            ReplaceJoint('Mid_hip', ['R_hip', 'L_hip'], dataset=self),
+            ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder'], dataset=self),
+
+            GetJoint('Mid_hip', clone=True, dataset=self),
+            GetFrame(0, clone=True, dataset=self),
+        )
 
 
 if __name__ == '__main__':
@@ -995,4 +1067,4 @@ if __name__ == '__main__':
         #    raise Exception
 
         #continue
-        visualize_mpl(tst['x_s'][0], show_basis=False, ds=ds)
+        visualize_mpl(pose['x_s'][0], show_basis=False, ds=ds)
