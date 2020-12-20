@@ -210,8 +210,12 @@ def rotate_and_maybe_project_world(X, angles=None, body_reference=True, project_
 
 
 def rotate_and_maybe_project_learning(X, meanpose, stdpose, angles=None, body_reference=True, project_2d=False):
+
+
+
     batch_size, channels, seq_len = X.size()
     n_joints = channels // 3
+
     X = restore_world_space(X, meanpose, stdpose, n_joints)
     X = rotate_and_maybe_project_world(X, angles, body_reference, project_2d)
     X = convert_to_learning_space(X, meanpose, stdpose)

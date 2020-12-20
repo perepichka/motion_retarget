@@ -33,28 +33,10 @@ DEFAULT_PARENTS_FILE = 'parents.txt'
 DEFAULT_WINDOW_SIZE = 64
 DEFAULT_INTERVAL = 32
 
-#DEFAULT_PRETRANSFORMS = torch.nn.Sequential(
-#    ReplaceJoint('Mid_hip', ['R_hip', 'L_hip']),
-#    ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder']),
-#    FlipAxis('x'),
-#    FlipAxis('y'),
-#    ScaleAnim(128),
-#    SlidingWindow(config.seq_len, config.stride)
-#)
-
-DEFAULT_TRANSFORMS = torch.nn.Sequential(
-    RandomScaleAnim(),
-    RandomRotateAnim()
-)
-
-#DEFAULT_PRETRANSFORMS_LIMBSCALE = torch.nn.Sequential(
-#    SlidingWindow(config.seq_len, config.stride),
-#)
-
-
 
 DATASETBASE_ARGUMENTS = {
-    'path': './data/mixamo/36_800_24/test_random_rotate',
+    #'path': './data/mixamo/36_800_24/test_random_rotate',
+    'path': DEFAULT_MIXAMO_TRAIN,
     'stats_path': DEFAULT_STATS_PATH,
     'joints_file': DEFAULT_JOINTS_FILE,
     'parents_file': DEFAULT_PARENTS_FILE,
@@ -68,37 +50,6 @@ DATASETBASE_ARGUMENTS = {
 VIEWS = torch.tensor(
     [i * np.pi / 6 for i in range(-3, 4)], dtype=torch.float32
 )
-
-def get_dataloader_test(path, config):
-    """Get dataloader for test.py"""
-
-    if 'test' not in path:
-        raise Exception('This is for the test set!')
-
-    batch_size = 1
-
-    dataset_cls_name = config.data.train_cls if 'train' in path else config.data.eval_cls
-
-    dataset_cls = getattr(thismodule, dataset_cls_name)
-
-
-    pre_transforms = torch.nn.Sequential(
-        #SlidingWindow(config.seq_len, config.stride),
-    )
-    pre_anim = torch.nn.Sequential(
-        InputData('basis', torch.eye(3), parallel_out=True),
-        InputRandomData('view_angles', ((0,0,0), (0,0,2*np.pi)), parallel_out=True),
-        RotateBasis(parallel_out=True),
-        RotateAnimWithBasis(pass_along=False),
-    )
-
-    num_workers=1
-    dataset = MixamoDatasset(path=path, config=config, pre_transforms=pre_transforms, pre_anim_transforms=pre_anim)
-    dataset.batch_size = 1
-
-    dataloader = DataLoader(dataset, batch_size=None, num_workers=num_workers)
-
-    return dataloader, dataset
 
 
 
@@ -121,10 +72,10 @@ def get_dataloader(path, config):
             SlidingWindow(config.seq_len, config.stride),
         )
         pre_anim = torch.nn.Sequential(
-            InputData('basis', torch.eye(3), parallel_out=True),
-            InputRandomData('view_angles', ((0,0,0), (0,0,2*np.pi)), parallel_out=True),
-            RotateBasis(parallel_out=True),
-            RotateAnimWithBasis(pass_along=False),
+            #InputData('basis', torch.eye(3), parallel_out=True),
+            #InputRandomData('view_angles', ((0,0,0), (0,0,2*np.pi)), parallel_out=True),
+            #RotateBasis(parallel_out=True),
+            #RotateAnimWithBasis(pass_along=False),
         )
 
 
@@ -570,6 +521,7 @@ class MixamoDataset(AnimDataset):
         data_21 = self._frames[ind_21:ind_21+1, ...]
         data_22 = self._frames[ind_22:ind_22+1, ...]
 
+
         # optional data augmentation
         if self.transforms is not None:
             data_111 = self.transforms(data_11)
@@ -589,16 +541,6 @@ class MixamoDataset(AnimDataset):
             data_221 = data_22.clone()
             data_212 = data_21.clone()
             data_222 = data_22.clone()
-
-        # Preprocessing
-        data_111 = self.preprocess({'x':data_111, 'view_angles':v_1}).squeeze()
-        data_121 = self.preprocess({'x':data_121, 'view_angles':v_1}).squeeze()
-        data_112 = self.preprocess({'x':data_112, 'view_angles':v_2}).squeeze()
-        data_122 = self.preprocess({'x':data_122, 'view_angles':v_2}).squeeze()
-        data_211 = self.preprocess({'x':data_211, 'view_angles':v_1}).squeeze()
-        data_221 = self.preprocess({'x':data_221, 'view_angles':v_1}).squeeze()
-        data_212 = self.preprocess({'x':data_212, 'view_angles':v_2}).squeeze()
-        data_222 = self.preprocess({'x':data_222, 'view_angles':v_2}).squeeze()
 
         # Preprocessing
         data_111 = self.preprocess({'x':data_111, 'view_angles':v_1}).squeeze()
@@ -647,11 +589,11 @@ class MixamoDataset(AnimDataset):
             ToBasis(parallel_out=True, dataset=self),
             RotateBasis(parallel_out=True, dataset=self),
             RotateAnimWithBasis(pass_along=False, dataset=self),
-            ReplaceJoint('Mid_hip', ['R_hip', 'L_hip'], dataset=self),
+            ReplaceJoint('Mid_hip', ['R_hip', 'L_hip'], dataset=self, clone=True),
             ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder'], dataset=self),
             FlipAxis('x'),
-            FlipAxis('z'),
-            #ScaleAnim(128),
+            FlipAxis('z', pass_along=False),
+            ScaleAnim(128),
             LocalReferenceFrame(dataset=self),
             NormalizeAnim(mean=self.mean, std=self.std, pass_along=False),
         )
@@ -788,14 +730,14 @@ class MixamoLimbScaleDataset(AnimDataset):
             ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder'], dataset=self),
             FlipAxis('x'),
             FlipAxis('z'),
-            #ScaleAnim(128),
+            ScaleAnim(128),
             To2D(pass_along=False),
         )
 
     def _generate_limbscale_pipeline(self):
         self.limb_scale = torch.nn.Sequential(
-            RandomScaleAnim(dataset=self, rng=(0.5, 2.0), clone=True),
             IK(dataset=self, clone=True),
+            RandomScaleAnim(dataset=self, rng=(0.5, 2.0), clone=True),
             LimbScale(dataset=self),
             FK(dataset=self),
         )
@@ -868,14 +810,15 @@ class SoloDanceDataset(AnimDataset):
 
     def _generate_preprocessing_pipeline(self):
         self.preprocess = torch.nn.Sequential(
+            ScaleAnim(128),
             ReplaceJoint('Mid_hip', ['R_hip', 'L_hip'], dataset=self),
             ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder'], dataset=self),
         )
 
     def _generate_limbscale_pipeline(self):
         self.limb_scale = torch.nn.Sequential(
-            RandomScaleAnim(dataset=self, rng=(0.5, 2.0), clone=True),
             IK(dataset=self, clone=True),
+            RandomScaleAnim(dataset=self, rng=(0.5, 2.0), clone=True),
             LimbScale(dataset=self),
             FK(dataset=self),
         )
@@ -934,11 +877,16 @@ class MixamoDatasetTest(AnimDataset):
         }
 
 
-    def unprocess(self, data_1, data_2, start_1, start_2):
+    def unprocess(self, data_1, data_2, start_1=None, start_2=None):
         """Process combination of characters."""
 
-        data_1_unprocessed = self.unpreprocess(data_1) + start_1
-        data_2_unprocessed = self.unpreprocess(data_2) + start_2
+        data_1_unprocessed = self.unpreprocess(data_1)
+        data_2_unprocessed = self.unpreprocess(data_2)
+
+        if start_1 is not None:
+            data_1_unprocessed = data_1_unprocessed + start_1
+        if start_2 is not None:
+            data_2_unprocessed = data_2_unprocessed + start_2
 
         return {'data_1': data_1_unprocessed, 'data_2': data_2_unprocessed}
 
@@ -948,6 +896,7 @@ class MixamoDatasetTest(AnimDataset):
             MultipleOfEight(clone=True),
             FlipAxis('x'),
             FlipAxis('z'),
+            ScaleAnim(128),
             To2D(),
             ReplaceJoint('Mid_hip', ['R_hip', 'L_hip'], dataset=self),
             ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder'], dataset=self),
@@ -960,12 +909,13 @@ class MixamoDatasetTest(AnimDataset):
 
     def _generate_unprocessing_pipeline(self):
         self.unpreprocess = torch.nn.Sequential(
-            Detach(),
+            Detach(clone=True),
             ToCPU(),
             Permute([0,2,1]),
             FromFeatureVector(dataset=self),
             DenormalizeAnim(mean=self.mean, std=self.std),
             GlobalReferenceFrame(dataset=self),
+            ScaleAnim(1.0/128.0),
         )
 
     def _generate_start_pipeline(self):
@@ -976,7 +926,6 @@ class MixamoDatasetTest(AnimDataset):
             To2D(),
             ReplaceJoint('Mid_hip', ['R_hip', 'L_hip'], dataset=self),
             ReplaceJoint('Neck', ['R_shoulder', 'L_shoulder'], dataset=self),
-
             GetJoint('Mid_hip', clone=True, dataset=self),
             GetFrame(0, clone=True, dataset=self),
         )
@@ -1000,7 +949,7 @@ if __name__ == '__main__':
     #)    
     pre_transforms = torch.nn.Sequential(
         #SlidingWindow(config.seq_len, config.stride),
-        SlidingWindow(64, 32),
+        #SlidingWindow(64, 32),
     )
     pre_anim = torch.nn.Sequential(
         #InputData('basis', torch.eye(3), parallel_out=True),
@@ -1008,11 +957,17 @@ if __name__ == '__main__':
         #RotateBasis(parallel_out=True),
         #RotateAnimWithBasis(pass_along=False ),
     )
+
+    transforms = torch.nn.Sequential(
+        #LocalReferenceFrame(),
+        #GlobalReferenceFrame(),
+    )
     
-    #ds = AnimDataset(
-    #    pre_transforms=pre_transforms,
-    #    #pre_anim_transforms=pre_anim,
-    #)
+    ds = AnimDataset(
+        pre_transforms=pre_transforms,
+        transforms=transforms,
+        pre_anim_transforms=pre_anim,
+    )
     #ds = MixamoLimbScaleDataset(
     #ds = MixamoDataset(
     #    config=get_config('configs/transmomo.yaml'),
@@ -1020,11 +975,11 @@ if __name__ == '__main__':
     #    pre_anim_transforms=pre_anim,
     #    batch_size=64
     #)
-    ds = SoloDanceDataset(
-        config=get_config('configs/transmomo.yaml'),
-        pre_transforms=pre_transforms,
-        batch_size=64
-    )
+    #ds = SoloDanceDataset(
+    #    config=get_config('configs/transmomo.yaml'),
+    #    pre_transforms=pre_transforms,
+    #    batch_size=64
+    #)
 
 
     #transformations = torch.nn.Sequential(
@@ -1048,10 +1003,10 @@ if __name__ == '__main__':
     #ds.save()
 
 
-    #dl = DataLoader(ds, batch_size=64, drop_last=True, num_workers=8)
+    dl = DataLoader(ds, batch_size=64, drop_last=True, num_workers=8)
     #dl = DataLoader(ds, batch_size=64, drop_last=True)
     #dl = DataLoader(ds, batch_size=None, num_workers=8)
-    dl = DataLoader(ds, batch_size=None)
+    #dl = DataLoader(ds, batch_size=None)
     _ = ds.mean
     _ = ds.std
 
@@ -1067,4 +1022,5 @@ if __name__ == '__main__':
         #    raise Exception
 
         #continue
-        visualize_mpl(pose['x_s'][0], show_basis=False, ds=ds)
+        print(pose.shape)
+        visualize_mpl(pose, show_basis=False, ds=ds)

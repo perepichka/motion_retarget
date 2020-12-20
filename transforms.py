@@ -15,6 +15,8 @@ from torch.utils.data import Dataset, DataLoader
 
 from copy import deepcopy
 
+from visualize import visualize_mpl
+
 
 DEFAULT_REF_FRAME_JOINT = 'Mid_hip'
 
@@ -205,7 +207,6 @@ class To2D(_AnimTransform):
 
     def transform(self, x, *args, **kwargs):
         if not self.keep_dim:
-            #return x[..., [1, 2]]
             return x[..., [0, 2]]
         else:
             x[..., 0] = 0
@@ -433,6 +434,7 @@ class LimbScale(_AnimTransform):
         # Dont scale root
         scales[..., 0, :] = 0
 
+
         x = scales * x
 
         return x
@@ -502,17 +504,25 @@ class LocalReferenceFrame(_AnimTransform):
 
         """
 
+        #visualize_mpl(x)
+
         rji = self.ds.joint_names.index(self.ref_joint)
 
         centers = x[...,rji:rji+1, :]
         x = x - centers
 
+        #print(torch.zeros(centers.shape[:-3] + (1,) + centers.shape[-2:]).shape)
+        #print((centers[..., 1:, :, :] - centers[..., :1, :, :]).shape)
+        #print(x.shape)
+        #raise Exception
+
         traj = torch.cat([
             torch.zeros(centers.shape[:-3] + (1,) + centers.shape[-2:]),
-            centers[..., 1:, :, :] - centers[..., :1, :, :]],
+            centers[..., 1:, :, :] - centers[..., :-1, :, :]],
             dim=-3
         )
-        x = torch.cat([x[...,:rji,:], traj, x[...,rji+1:,:]], dim=-2)
+        #x = torch.cat([x[...,:rji,:], traj, x[...,rji+1:,:]], dim=-2)
+        x = torch.cat([x[...,:rji,:], x[...,rji+1:,:], traj], dim=-2)
         return x
 
 
@@ -530,20 +540,44 @@ class GlobalReferenceFrame(_AnimTransform):
     def transform(self, x, *args, **kwargs):
         """Transformation function.
 
+
         :param x: Input animation data.
 
         """
 
         rji = self.ds.joint_names.index(self.ref_joint)
-        
-        velocity = x[...,rji:rji+1, :]
+        velocity = x[...,-1:, :]
+
         integrated = torch.cumsum(velocity, dim=-3)
 
-        x[...,rji:rji+1, :] = integrated
-        x[...,:rji, :] = x[...,:rji, :] + integrated 
-        x[...,rji+1:, :] = x[...,rji+1:, :] + integrated 
+        #x[...,rji:rji+1, :] = integrated
+        #x[...,:rji, :] = x[...,:rji, :] + integrated 
+        #x[...,rji+1:, :] = x[...,rji+1:, :] + integrated 
 
-        return x
+        x_new = torch.cat([
+            x[...,:rji, :]+integrated,
+            integrated, 
+            x[...,rji:-1, :]+integrated
+        ], dim=-2)
+
+        #motion_inv = torch.cat([x[...,:rji, :], torch.zeros_like(x[...,rji:rji+1, :]), x[...,rji+1:, :]], dim=-2)
+
+        #centers = torch.zeros_like(x[...,rji:rji+1, :])
+        #traj_sum = 0
+        #for i in range(x.shape[-3]):#
+        #    traj_sum += velocity[..., i, :, :]
+        #    centers[:, i] = traj_sum
+
+
+        #visualize_mpl(x)
+        #return motion_inv + centers
+        #print(velocity.shape)
+        #print(integrated.shape)
+        #print(x.shape)
+        #print(x
+        #raise Exception
+
+        return x_new
 
 class GetJoint(_AnimTransform):
 

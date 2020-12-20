@@ -16,7 +16,7 @@ import matplotlib.animation as animation
 PARENTS = [-1, 0, 1, 2, 3, 1, 5, 6, 1, 8, 9, 10, 8, 12, 13]
 
 
-def visualize_mpl(data, show_basis=False, ds=None, fps=60, j_color='green', l_color='green', b_color='#222222', auto_limits=True, save_path=None):
+def visualize_mpl(data, show_basis=False, ds=None, fps=60, j_color='green', l_color='green', b_color='#222222', auto_limits=True, save_path=None, frame_to_show=-1, show_axes=False):
     """Visualizes animation data using matplotlib.
 
     :param data: Animation data in format [nframes, njoints, 3]
@@ -28,6 +28,8 @@ def visualize_mpl(data, show_basis=False, ds=None, fps=60, j_color='green', l_co
     :param b_color: Background color.
     :param auto_limits: Automatically detect axes limits.
     :param save_path: Path to save animation.
+    :param frame: Frame to visualize (-1 is all).
+    :param show_axes: Visualize axes.
 
     """
 
@@ -57,6 +59,9 @@ def visualize_mpl(data, show_basis=False, ds=None, fps=60, j_color='green', l_co
     else:
         data = data.copy().squeeze()
 
+    if frame_to_show != -1:
+        data = data[frame_to_show:frame_to_show+1,...]
+    
         
     # Easier to work with in this format
     data = data.copy().swapaxes(0,-1)
@@ -139,37 +144,51 @@ def visualize_mpl(data, show_basis=False, ds=None, fps=60, j_color='green', l_co
     )
 
     if auto_limits:
-        x_max = data[0,:].max()
-        x_min = data[0,:].min()
-        x_std = data[0,:].std()
-        y_max = data[1,:].max()
-        y_min = data[1,:].min()
-        y_std = data[1,:].std()
+        print('Computing auto-limits')
+        x_max = data[0,:,:].max()
+        x_min = data[0,:,:].min()
+        x_std = data[0,:,:].std()
+        y_max = data[1,:,:].max()
+        y_min = data[1,:,:].min()
+        y_std = data[1,:,:].std()
         if ndim == 3:
-            z_max = data[2,:].max()
-            z_min = data[2,:].min()
-            z_std = data[2,:].std()
+            z_max = data[2,:,:].max()
+            z_min = data[2,:,:].min()
+            z_std = data[2,:,:].std()
     else:
-        x_max = 1
-        x_min = 0
+        x_max = 0.5
+        x_min = -1.5
         x_std = 0
-        y_max = 1
-        y_min = 0
+        y_max = 2.5
+        y_min = 0.5
         y_std = 0
         if ndim == 3:
             z_max = 1
             z_min = 0
             z_std = 0
 
-    if ndim == 3:
-        ax.set_xlim3d(x_min-x_std,x_max+x_std)
-        ax.set_ylim3d(y_min-y_std,y_max+y_std)
-        ax.set_zlim3d(z_min-z_std,z_max+z_std)
-    elif ndim == 2:
-        ax.set_xlim(x_min-x_std,x_max+x_std)
-        ax.set_ylim(y_min-y_std,y_max+y_std)
+    if frame_to_show == -1:
+        if ndim == 3:
+            ax.set_xlim3d(x_min-x_std,x_max+x_std)
+            ax.set_ylim3d(y_min-y_std,y_max+y_std)
+            ax.set_zlim3d(z_min-z_std,z_max+z_std)
+        elif ndim == 2:
+            ax.set_xlim(x_min-x_std,x_max+x_std)
+            ax.set_ylim(y_min-y_std,y_max+y_std)
+    else:
+        eps = 0.1
+        if ndim == 3:
+            ax.set_xlim3d(x_min,x_max)
+            ax.set_ylim3d(y_min,y_max)
+            ax.set_zlim3d(z_min,z_max)
+        elif ndim == 2:
+            ax.set_xlim(x_min-eps,x_max+eps)
+            ax.set_ylim(y_min-eps,y_max+eps)
+        ax.set_aspect('equal')
 
-    #plt.axis('off')
+    
+    if not show_axes:
+        plt.axis('off')
     plt.show()
 
     if save_path is not None:
@@ -229,7 +248,15 @@ if __name__ == '__main__':
     parser.add_argument('--b_color', type=str, help='background color', default='white')
     parser.add_argument('--c_color', type=str, help='character color', default='green')
     parser.add_argument('--fps', type=int, help='animation framerate', default=60)
-    parser.add_argument('--flip', action='store_true')
+    parser.add_argument('--flip', action='store_true', help='flips the animation')
+
+    parser.add_argument('--frame', type=int, default=-1, help='visualize a single frame')
+    parser.add_argument('--to_2d', action='store_true',  help='project animation to 2d')
+    parser.add_argument('--show_axes', action='store_true',  help='show axes?')
+    parser.add_argument('--name', type=str,  help='name of saved file', default=None)
+
+    parser.add_argument('--no_auto_limits', action='store_true', help='automatically compute fig limits')
+    parser.add_argument('--no_save', action='store_true', help='don\'t save animation')
 
     if not os.path.isdir('./visualizations'):
         os.mkdir('./visualizations')
@@ -242,6 +269,9 @@ if __name__ == '__main__':
         anim[:, 0, :] = -anim[:, 0, :]
         anim[:, 1, :] = -anim[:, 1, :]
 
+    if args.to_2d and anim.shape[-2] == 3:
+        anim = anim[:, [0,2], :]
+
     anim = anim.swapaxes(0, -1).swapaxes(1,2)
 
     basename = os.path.basename(args.path).replace('npy', 'gif')
@@ -249,16 +279,31 @@ if __name__ == '__main__':
     if basename in ['{}.gif'.format(i) for i in range(1,10)]:
         basename = os.path.dirname(args.path).split(os.path.sep)[-1] + '.gif'
 
-    out_path = os.path.realpath(os.path.join(
-        './visualizations',
-        basename
-    ))
+    if args.name is None:
+        out_path = os.path.realpath(os.path.join(
+            './visualizations',
+            basename
+        ))
+    else:
+        if 'gif' in args.name:
+            out_path = os.path.realpath(os.path.join(
+                './visualizations',
+                args.name.replace('gif', 'png')
+            ))
+        else:
+            out_path = os.path.realpath(os.path.join(
+                './visualizations',
+                args.name + '.png'
+            ))
 
     visualize_mpl(
         anim,
-        save_path=out_path,
+        save_path=out_path if not args.no_save else None,
         fps=args.fps,
         j_color=args.c_color,
         l_color=args.c_color,
-        b_color=args.b_color
+        b_color=args.b_color,
+        frame_to_show=args.frame,
+        show_axes=args.show_axes,
+        auto_limits=(not args.no_auto_limits),
     )

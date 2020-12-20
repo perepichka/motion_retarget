@@ -10,7 +10,7 @@ seq_len: 64                   # length of motion sequence
 stride: 32                   # stride between sequence samples
 
 # logger options
-snapshot_save_iter: 20000
+snapshot_save_iter: 2000
 log_iter: 40
 val_iter: 400
 val_batches: 10

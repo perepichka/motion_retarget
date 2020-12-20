@@ -8,8 +8,9 @@ from models import get_autoencoder
 from utils import get_config
 from itertools import combinations
 
-from data import MixamoDatasetTest
+from data import MixamoDatasetTest, get_dataloader
 from transforms import *
+from visualize import visualize_mpl
 
 
 def main():
@@ -25,6 +26,8 @@ def main():
                         help="path to the directory storing test data")
     parser.add_argument('--out_dir', type=str, required=True,
                         help="path to output directory")
+    parser.add_argument('--visualize', action='store_true',
+                        help="whether to visualize each test-case")
     args = parser.parse_args()
 
     config = get_config(args.config)
@@ -33,7 +36,9 @@ def main():
     ae.cuda()
     ae.eval()
 
-    pre_trans = torch.nn.Sequential()
+    pre_trans = torch.nn.Sequential(
+        #SlidingWindow(64, 32),
+    )
     pre_anim = torch.nn.Sequential(
         #InputData('basis', torch.eye(3), parallel_out=True),
         #InputRandomData('view_angles', ((0,0,0), (0,0,2*np.pi)), parallel_out=True),
@@ -44,9 +49,24 @@ def main():
         path=args.data_dir,
         config=config,
         pre_transform=pre_trans,
-        pre_anim=pre_anim
+        pre_anim_transforms=pre_anim
     )
     mean_pose, std_pose = ds.mean, ds.std
+
+    tst_dl, tst_ds = get_dataloader('./data/solo_dance/train', config)
+
+
+    #for i, v in enumerate(tst_dl):
+    #    print('loading example {}'.format(i))
+    #    x_s = v['x_s'].cuda()
+    #    x = v['x'].cuda()
+    #    x_c = ae.cross2d(x, x_s, x)
+    #    tst = ds.unprocess(x, x_s)
+    #    x_r = tst['data_1']
+    #    x_rs = tst['data_2']
+    #    visualize_mpl(x_r[0,...])
+    #    visualize_mpl(x_rs[0,...])
+    #    raise Exception
 
 
     description = json.load(open(args.description))
@@ -83,6 +103,12 @@ def main():
 
                 data_out = ds.unprocess(x_ab, x_ba, x_a_start, x_b_start)
                 x_ab, x_ba = data_out['data_1'], data_out['data_2']
+                
+                if args.visualize:
+                    print('visualizing')
+                    visualize_mpl(x_ab)
+                    visualize_mpl(x_ba)
+                    raise Exception
 
                 x_ab_np = x_ab.numpy().squeeze().swapaxes(2,1).swapaxes(-1, 0)
                 x_ba_np = x_ba.numpy().squeeze().swapaxes(2,1).swapaxes(-1, 0)

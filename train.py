@@ -21,7 +21,8 @@ from utils import get_config, get_scheduler, weights_init, to_gpu, write_loss, g
 import models
 from loss import *
 
-from data import get_dataloader
+from data import get_dataloader, MixamoDatasetTest
+from visualize import visualize_mpl
 
 from operation import rotate_and_maybe_project_learning
 
@@ -108,6 +109,13 @@ class Trainer(nn.Module):
         train_loader, train_ds = get_dataloader(self.config.data.train_dir, self.config)
         val_loader, val_ds = get_dataloader(self.config.data.test_dir, self.config)
 
+        recon_ds = MixamoDatasetTest(
+            path='./data/mixamo/36_800_24/test_random_rotate',
+            config=self.config,
+            pre_transform=None,
+            pre_anim_transforms=None
+        )
+
         # Setup logger and output folders
         train_writer = tensorboardX.SummaryWriter(os.path.join(args.out_dir, self.config.name, "logs"))
         checkpoint_directory = os.path.join(args.out_dir, self.config.name, 'checkpoints')
@@ -141,6 +149,7 @@ class Trainer(nn.Module):
 
                 # Run validation
                 if (iterations + 1) % self.config.val_iter == 0:
+                #if True:
                     val_batches = []
                     for i, batch in enumerate(val_loader):
                         if i >= self.config.val_batches: break
@@ -152,7 +161,7 @@ class Trainer(nn.Module):
                             val_data[key] = torch.cat(data, dim=0)
                     if self.config.use_gpu:
                         val_data = to_gpu(val_data)
-                    self.validate(val_data, self.config)
+                    self.validate(val_data, self.config, recon_ds)
                     val_iter = (iterations + 1) // self.config.val_iter
                     max_val_iter = max_iter // self.config.val_iter
                     elapsed = (time.time() - start) / 3600.0
@@ -167,10 +176,8 @@ class Trainer(nn.Module):
                     logging.info("training %6d/%6d, elapsed: %.2f hrs, loss: %.6f" % (iterations + 1, max_iter, elapsed, self.loss_total))
 
                 # Save network weights
-                #if (iterations + 1) % self.config.snapshot_save_iter == 0:
-                #    trainer.save(checkpoint_directory, iterations)
-                if (iterations) % self.config.snapshot_save_iter == 0:
-                    self.save(checkpoint_directory, iterations)
+                if (iterations + 1) % self.config.snapshot_save_iter == 0:
+                    trainer.save(checkpoint_directory, iterations)
 
                 iterations += 1
                 pbar.update(1)
@@ -196,7 +203,6 @@ class Trainer(nn.Module):
         return x_ab, x_ba
 
     def dis_update(self, data, config, ds):
-        #.permute(0, 2, 1)
         if self.config.use_gpu:
             x_a = data['x'].detach()
             x_s = data['x_s'].detach()
@@ -231,6 +237,7 @@ class Trainer(nn.Module):
 
         X_a_recon = self.autoencoder.decode(motion_a, body_a, view_a)
         x_a_trans = rotate_and_maybe_project_learning(X_a_recon, meanpose, stdpose, angles=angles, body_reference=config.autoencoder.body_reference, project_2d=True)
+
 
         x_a_exp = x_a.repeat_interleave(config.K, dim=0)
 
@@ -408,8 +415,8 @@ class Trainer(nn.Module):
         torch.save(self.discriminator.state_dict(), dis_name)
         torch.save({'autoencoder': self.ae_opt.state_dict(), 'discriminator': self.dis_opt.state_dict()}, opt_name)
 
-    def validate(self, data, config):
-        re_dict = self.evaluate(self.autoencoder, data, config)
+    def validate(self, data, config, recon_ds):
+        re_dict = self.evaluate(self.autoencoder, data, config, recon_ds)
         for key, val in re_dict.items():
             setattr(self, key, val)
 
@@ -419,7 +426,7 @@ class Trainer(nn.Module):
         return torch.mean(torch.abs(input - target))
 
     @classmethod
-    def evaluate(cls, autoencoder, data, config):
+    def evaluate(cls, autoencoder, data, config, recon_ds):
         autoencoder.eval()
         x_a, x_b = data["x_a"], data["x_b"]
         x_aba, x_bab = data["x_aba"], data["x_bab"]
@@ -434,6 +441,13 @@ class Trainer(nn.Module):
             x_b_recon = autoencoder.reconstruct2d(x_b)
             x_aba_recon = autoencoder.cross2d(x_a, x_b, x_a)
             x_bab_recon = autoencoder.cross2d(x_b, x_a, x_b)
+
+            #tst = recon_ds.unprocess(x_aba_recon, x_bab_recon)
+            #visualize_mpl(tst['data_1'][0])
+            #visualize_mpl(tst['data_2'][0])
+            #tst2 = recon_ds.unprocess(x_a, x_b)
+            #visualize_mpl(tst2['data_1'][0])
+            #visualize_mpl(tst2['data_2'][0])
 
             re_dict['loss_val_recon_x'] = cls.recon_criterion(x_a_recon, x_a) + cls.recon_criterion(x_b_recon, x_b)
 
